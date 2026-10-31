@@ -1,5 +1,7 @@
 """Integração da UI desktop, cópia de trabalho e exportação sem recálculo."""
+from collections import Counter
 from io import BytesIO
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -17,7 +19,9 @@ from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from apresentacao import ResultadoInterface, exportar_planilha, processar_planilha
+import ensalamento
 from interface_desktop import JanelaPrincipal
+from metricas import calcular_metricas
 
 
 def criar_entrada(caminho):
@@ -41,15 +45,67 @@ def criar_entrada(caminho):
     livro.close()
 
 
+def criar_entrada_sem_vagas(caminho):
+    """415 alunos válidos e capacidade para 403, usando o solver real."""
+    criar_entrada(caminho)
+    livro = load_workbook(caminho)
+    alunos = livro["Alunos"]
+    alunos.delete_rows(2, alunos.max_row - 1)
+    for indice in range(215):
+        alunos.append([f"Aluna manhã {indice}", "F", "Manhã"])
+    for indice in range(200):
+        alunos.append([f"Aluno tarde {indice}", "M", "Tarde"])
+    turmas = livro["Turmas"]
+    turmas.delete_rows(2, turmas.max_row - 1)
+    for linha in [["turmas_manha", 1], ["turmas_tarde", 1], ["vagas_manha", 203], ["vagas_tarde", 200]]:
+        turmas.append(linha)
+    livro.save(caminho)
+    livro.close()
+
+
 class PlanilhaTest(unittest.TestCase):
+    def _processar_verificando_metricas(self, origem):
+        with (
+            patch("ensalamento.resolver", wraps=ensalamento.resolver) as resolver,
+            patch("ensalamento.salvar_resultado_excel", wraps=ensalamento.salvar_resultado_excel) as salvar,
+            patch("apresentacao.calcular_metricas", wraps=calcular_metricas) as calcular,
+        ):
+            resultado = processar_planilha(origem)
+        resolver.assert_called_once()
+        salvar.assert_called_once()
+        calcular.assert_called_once()
+        argumentos = calcular.call_args.kwargs
+        # As métricas recebem os próprios objetos usados na resolução e na
+        # gravação da cópia, em vez de uma reconstrução da planilha de saída.
+        self.assertIs(argumentos["alunos"], resolver.call_args.args[0])
+        self.assertIs(argumentos["estrutura"], resolver.call_args.args[1])
+        self.assertIs(argumentos["saida"], salvar.call_args.args[1])
+        self.assertIs(argumentos["nao_alocados"], salvar.call_args.kwargs["nao_alocados"])
+        self.assertNotEqual(Path(salvar.call_args.args[0]), origem.resolve())
+        self.assertIsInstance(resultado.metricas, dict)
+        self.assertTrue({"resumo", "por_turno", "turmas", "situacao_turmas", "nao_alocados",
+                         "balanceamento", "destaques"}.issubset(resultado.metricas))
+        resumo = resultado.metricas["resumo"]
+        self.assertEqual(resumo["alunos_alocados"], len(resultado.distribuicao))
+        self.assertEqual(resumo["alunos_sem_turma"], resultado.sem_turma)
+        self.assertEqual(resumo["total_turmas"], len(resultado.grupos))
+        self.assertEqual(resumo["status_solver"], argumentos["status_solver"])
+        self.assertEqual(resumo["valor_objetivo"], argumentos["valor_objetivo"])
+        self.assertEqual(resultado.metricas, json.loads(json.dumps(resultado.metricas, allow_nan=False)))
+        return resultado
+
     def test_modelo_original_roda_em_copia_e_exportacao_preserva_abas(self):
         with tempfile.TemporaryDirectory() as pasta:
             origem = Path(pasta) / "entrada.xlsx"
             criar_entrada(origem)
             antes = origem.read_bytes()
-            resultado = processar_planilha(origem)
+            resultado = self._processar_verificando_metricas(origem)
             self.assertEqual(origem.read_bytes(), antes)
             self.assertEqual(len(resultado.distribuicao), 4)
+            self.assertEqual(resultado.sem_turma, 0)
+            self.assertEqual(resultado.metricas["resumo"]["total_alunos"], 4)
+            self.assertEqual(resultado.metricas["resumo"]["status_solver"], "Optimal")
+            self.assertEqual(resultado.metricas["resumo"]["valor_objetivo"], 0.0)
             self.assertEqual(len(resultado.grupos), 3)
             self.assertEqual(sum(resultado.totais.values()), 4)
             self.assertEqual(sum(sum(v) for v in resultado.sexos.values()), 4)
@@ -58,7 +114,7 @@ class PlanilhaTest(unittest.TestCase):
             self.assertIn("NOMES DUPLICADOS", resultado.relatorio())
             self.assertIn("Linha(s) 6", resultado.relatorio())
             destino = Path(pasta) / "saida.xlsx"
-            with patch("ensalamento.executar", side_effect=AssertionError("Não recalcular na exportação")):
+            with patch("ensalamento.resolver", side_effect=AssertionError("Não recalcular na exportação")):
                 exportar_planilha(resultado, destino)
             self.assertEqual(destino.read_bytes(), resultado.planilha)
             livro = load_workbook(destino)
@@ -73,15 +129,82 @@ class PlanilhaTest(unittest.TestCase):
             livro.close()
             self.assertEqual(origem.read_bytes(), antes)
 
+    def test_falta_de_vagas_separa_alocados_e_exporta_resultado_completo(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            origem = Path(pasta) / "entrada.xlsx"
+            criar_entrada_sem_vagas(origem)
+            antes = origem.read_bytes()
+            resultado = self._processar_verificando_metricas(origem)
+            self.assertEqual(origem.read_bytes(), antes)
+            self.assertEqual(len(resultado.distribuicao), 403)
+            self.assertEqual(resultado.sem_turma, 12)
+            self.assertEqual(resultado.metricas["resumo"]["total_alunos"], 415)
+            self.assertEqual(resultado.metricas["resumo"]["valor_objetivo"], 36.0)
+            self.assertEqual(resultado.metricas["nao_alocados"]["total"], 12)
+            self.assertEqual(len(resultado.grupos), 2)
+            self.assertNotIn("SEM TURMA", resultado.grupos)
+            self.assertTrue(all(r["Turma"] in resultado.grupos for r in resultado.distribuicao))
+            self.assertEqual(sum(resultado.totais.values()), 403)
+            self.assertEqual(sum(sum(v) for v in resultado.sexos.values()), 403)
+            self.assertEqual(sorted(resultado.totais.values()), [200, 203])
+            self.assertEqual(len(resultado.inconsistencias), 12)
+            self.assertTrue(all("Aluno sem turma" in r["Motivo"] for r in resultado.inconsistencias))
+            self.assertIn("ALUNOS SEM TURMA (12)", resultado.relatorio())
+
+            destino = Path(pasta) / "saida.xlsx"
+            with patch("ensalamento.resolver", side_effect=AssertionError("Não recalcular na exportação")):
+                exportar_planilha(resultado, destino)
+            self.assertEqual(destino.read_bytes(), resultado.planilha)
+            self.assertEqual(origem.read_bytes(), antes)
+            livro = load_workbook(destino)
+            try:
+                linhas = [r for r in livro["Ensalamento"].iter_rows(min_row=2, max_col=4, values_only=True) if r[0]]
+                self.assertEqual(len(linhas), 415)
+                sem_turma = [r for r in linhas if r[3] == "SEM TURMA"]
+                self.assertEqual(len(sem_turma), 12)
+                avisos = [r for r in livro["Inconsistências"].iter_rows(min_row=2, max_col=3, values_only=True) if r[0]]
+                self.assertEqual(len(avisos), 12)
+                self.assertEqual(Counter(r[0] for r in sem_turma), Counter(r[1] for r in avisos))
+                self.assertEqual(livro["Alunos"].max_row, 416)
+                self.assertEqual(livro["Notas"]["A1"].value, "Preservar aba adicional")
+                self.assertEqual(livro["Ensalamento"]["H30"].value, "Nota à direita da tabela de saída")
+            finally:
+                livro.close()
+
     def test_falha_do_modelo_preserva_original_e_nao_oferece_resultado(self):
         with tempfile.TemporaryDirectory() as pasta:
             origem = Path(pasta) / "entrada.xlsx"
             criar_entrada(origem)
             antes = origem.read_bytes()
-            with patch("ensalamento.executar", side_effect=ValueError("Solução não ótima")):
+            with patch("ensalamento.executar_com_resultado", side_effect=ValueError("Solução não ótima")):
                 with self.assertRaisesRegex(ValueError, "não ótima"):
                     processar_planilha(origem)
             self.assertEqual(origem.read_bytes(), antes)
+
+    def test_executar_preserva_resumo_e_gravacao_no_proprio_arquivo(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            origem = Path(pasta) / "entrada.xlsx"
+            criar_entrada(origem)
+            antes = origem.read_bytes()
+            with (
+                patch("ensalamento.resolver", wraps=ensalamento.resolver) as resolver,
+                patch("apresentacao.calcular_metricas", side_effect=AssertionError("Métricas são da apresentação")),
+            ):
+                resumo = ensalamento.executar(origem)
+            resolver.assert_called_once()
+            self.assertEqual(resumo, (
+                "Ensalamento concluído e salvo no Excel.\n"
+                "Alunos alocados: 4 | Sem turma: 0\n"
+                "Inconsistências/avisos registrados: 2."
+            ))
+            self.assertNotEqual(origem.read_bytes(), antes)
+            livro = load_workbook(origem)
+            try:
+                self.assertEqual(livro["Ensalamento"]["A2"].value, "Ana")
+                self.assertEqual(livro["Inconsistências"]["A2"].value, 6)
+                self.assertEqual(livro["Alunos"].max_row, 6)
+            finally:
+                livro.close()
 
     def test_exportacao_bloqueada_preserva_destino_e_limpa_temporario(self):
         with tempfile.TemporaryDirectory() as pasta:
@@ -105,7 +228,7 @@ def amostra():
     return ResultadoInterface(Path("amostra.xlsx"), b"planilha", [r for g in grupos.values() for r in g],
                               [{"Linha": "2, 3", "Nome": "João", "Motivo": "Nome duplicado no cadastro."}],
                               grupos, {k: len(v) for k, v in grupos.items()},
-                              {"MANHÃ - A": (1, 1), "MANHÃ - B": (0, 0), "TARDE - C": (1, 0)}, 0)
+                              {"MANHÃ - A": (1, 1), "MANHÃ - B": (0, 0), "TARDE - C": (1, 0)}, 0, {})
 
 
 class InterfaceTest(unittest.TestCase):
@@ -140,6 +263,24 @@ class InterfaceTest(unittest.TestCase):
         w.mudar_dashboard(1)
         self.assertEqual(w.graficos[1].dados["MANHÃ - B"], (0, 0))
         self.assertEqual(w.titulo_dashboard.text(), "Homens e mulheres por turma")
+
+    def test_indicadores_combo_e_graficos_com_alunos_sem_turma(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            origem = Path(pasta) / "entrada.xlsx"
+            criar_entrada_sem_vagas(origem)
+            resultado = processar_planilha(origem)
+        w = self.janela
+        w.mostrar_resultado(resultado)
+        self.assertEqual(w.indicadores[0].text(), "403")
+        self.assertEqual(w.indicadores[2].text(), "12")
+        self.assertEqual([w.turma.itemText(i) for i in range(w.turma.count())], list(resultado.grupos))
+        self.assertNotIn("SEM TURMA", w.graficos[0].dados)
+        self.assertNotIn("SEM TURMA", w.graficos[1].dados)
+        self.assertEqual(w.graficos[0].dados, resultado.totais)
+        self.assertEqual(w.graficos[1].dados, resultado.sexos)
+        self.assertEqual(sum(w.graficos[0].dados.values()), 403)
+        self.assertEqual(sum(sum(v) for v in w.graficos[1].dados.values()), 403)
+        self.assertIn("ALUNOS SEM TURMA (12)", w.relatorio.toPlainText())
 
     def test_uma_turma_por_vez_busca_e_homonimos(self):
         w = self.janela

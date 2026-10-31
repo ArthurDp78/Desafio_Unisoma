@@ -13,6 +13,7 @@ import pandas as pd
 
 import ensalamento
 from dados import criar_turmas
+from metricas import calcular_metricas
 
 
 def texto_busca(texto: str) -> str:
@@ -43,6 +44,7 @@ class ResultadoInterface:
     totais: dict[str, int]
     sexos: dict[str, tuple[int, int]]
     sem_turma: int
+    metricas: dict
 
     def relatorio(self) -> str:
         linhas = [self.origem.name, f"{len(self.inconsistencias)} registros de inconsistências", ""]
@@ -66,15 +68,22 @@ def processar_planilha(origem: Path) -> ResultadoInterface:
     with tempfile.TemporaryDirectory(prefix="abc_aprendiz_") as pasta:
         copia = Path(pasta) / "instancia.xlsx"
         shutil.copyfile(origem, copia)
-        ensalamento.executar(copia)
+        execucao = ensalamento.executar_com_resultado(copia)
         with pd.ExcelFile(copia) as excel:
-            estrutura = ensalamento.ler_estrutura(excel)
             resultado_ensalamento = pd.read_excel(excel, sheet_name=ensalamento.ABAS["saida"],
                                          usecols=ensalamento.COLUNAS_SAIDA).dropna(how="all").fillna("").to_dict("records")
             inconsistencias = pd.read_excel(excel, sheet_name=ensalamento.ABAS["erros"],
                                              usecols=["Linha", "Nome", "Motivo"]).dropna(how="all").fillna("").to_dict("records")
         planilha = copia.read_bytes()
-    grupos = {nome: [] for _, nome, _ in criar_turmas(estrutura)}
+    metricas = calcular_metricas(
+        alunos=execucao.alunos,
+        estrutura=execucao.estrutura,
+        saida=execucao.saida,
+        nao_alocados=execucao.nao_alocados,
+        status_solver=execucao.status_solver,
+        valor_objetivo=execucao.valor_objetivo,
+    )
+    grupos = {nome: [] for _, nome, _ in criar_turmas(execucao.estrutura)}
     distribuicao = []
     nao_alocados = []
     # A planilha completa é preservada para exportação. Os grupos e indicadores
@@ -94,7 +103,7 @@ def processar_planilha(origem: Path) -> ResultadoInterface:
     sexos = {nome: (sum(r["Sexo"] == "M" for r in registros), sum(r["Sexo"] == "F" for r in registros))
              for nome, registros in grupos.items()}
     return ResultadoInterface(origem, planilha, distribuicao, inconsistencias, grupos, totais, sexos,
-                              len(nao_alocados))
+                              len(nao_alocados), metricas)
 
 
 def exportar_planilha(resultado: ResultadoInterface, destino: Path) -> Path:

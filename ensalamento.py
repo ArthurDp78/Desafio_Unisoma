@@ -12,7 +12,7 @@ import pandas as pd
 import pulp
 from openpyxl import load_workbook
 
-from dados import criar_turmas
+from dados import Aluno, criar_turmas
 
 
 ABAS = {"alunos": "Alunos", "turmas": "Turmas", "saida": "Ensalamento", "erros": "Inconsistências"}
@@ -51,11 +51,16 @@ def valor_sexo(valor: object) -> tuple[str | None, str | None]:
 
 
 @dataclass(frozen=True)
-class Aluno:
-    linha: int
-    nome: str
-    sexo: str
-    periodo: str
+class ResultadoExecucao:
+    """Dados da mesma execução que gravou o XLSX, disponíveis para análise."""
+
+    alunos: list[Aluno]
+    estrutura: dict[str, dict[str, int]]
+    saida: list[dict]
+    nao_alocados: list[Aluno]
+    inconsistencias: list[dict]
+    status_solver: str
+    valor_objetivo: float | None
 
 
 def ler_estrutura(xls: pd.ExcelFile) -> dict[str, dict[str, int]]:
@@ -259,11 +264,16 @@ def salvar_resultado_excel(
         raise
 
 
-def executar(arquivo: Path) -> str:
+def executar_com_resultado(arquivo: Path) -> ResultadoExecucao:
+    """Lê, resolve uma vez e grava o XLSX, retornando os dados da execução.
+
+    Não calcula métricas nem depende da apresentação. A função pública
+    ``executar`` usa esta mesma rotina e mantém seu resumo de texto.
+    """
     with pd.ExcelFile(arquivo) as xls:
         estrutura = ler_estrutura(xls)
         alunos, inconsistencias = ler_alunos(xls)
-    saida, _, nao_alocados, status, _ = resolver(alunos, estrutura)
+    saida, _, nao_alocados, status, valor_objetivo = resolver(alunos, estrutura)
     for aluno in nao_alocados:
         inconsistencias.append({
             "Linha": aluno.linha,
@@ -281,10 +291,24 @@ def executar(arquivo: Path) -> str:
         )
 
     salvar_resultado_excel(arquivo, saida, inconsistencias, nao_alocados=nao_alocados)
+    return ResultadoExecucao(
+        alunos=alunos,
+        estrutura=estrutura,
+        saida=saida,
+        nao_alocados=nao_alocados,
+        inconsistencias=inconsistencias,
+        status_solver=status,
+        valor_objetivo=valor_objetivo,
+    )
+
+
+def executar(arquivo: Path) -> str:
+    """Mantém a execução com gravação no arquivo e o resumo usado pelo terminal."""
+    resultado = executar_com_resultado(arquivo)
     return (
         f"Ensalamento concluído e salvo no Excel.\n"
-        f"Alunos alocados: {len(saida)} | Sem turma: {len(nao_alocados)}\n"
-        f"Inconsistências/avisos registrados: {len(inconsistencias)}."
+        f"Alunos alocados: {len(resultado.saida)} | Sem turma: {len(resultado.nao_alocados)}\n"
+        f"Inconsistências/avisos registrados: {len(resultado.inconsistencias)}."
     )
 
 
