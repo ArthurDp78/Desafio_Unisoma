@@ -8,7 +8,7 @@ Aplicação em Python para distribuir os alunos matriculados nas turmas disponí
 2. Lê as abas **Alunos** e **Turmas**.
 3. Valida os registros e a capacidade disponível.
 4. Resolve um modelo matemático de programação inteira binária usando PuLP e o solver CBC.
-5. Grava as abas **Ensalamento** e **Inconsistências** no mesmo arquivo selecionado.
+5. Imprime no terminal a distribuição, os totais por turma, alunos sem vaga e avisos de inconsistência. Nesta fase de depuração, o Excel não é alterado.
 
 ## Regras representadas
 
@@ -54,10 +54,9 @@ Os parâmetros são lidos do Excel em cada execução; não ficam fixos no códi
 
 ## Arquivos de saída
 
-- **Ensalamento**: colunas na ordem `Nome`, `Sexo`, `Disponibilidade`, `Turma`.
-- **Inconsistências**: colunas `Linha`, `Nome`, `Motivo`; registra dados corrigidos automaticamente, registros que não puderam ser alocados e nomes duplicados.
+- **Terminal**: mostra status do solver e valor objetivo, lista de alunos alocados, totais por turma, alunos sem vaga e avisos. Registra dados corrigidos automaticamente, registros inválidos e nomes duplicados.
 
-As abas de entrada são mantidas. Se as abas de saída já existirem, elas são substituídas. Faça uma cópia do Excel antes de executar.
+O Excel é usado somente como entrada e não é modificado nesta fase de depuração.
 
 ## Instalação e execução no Windows
 
@@ -70,7 +69,7 @@ python -m pip install -r requirements.txt
 python ensalamento.py
 ```
 
-Também é possível abrir `executar.bat`. A janela do programa permite selecionar o `.xlsx` sem passar o caminho pela linha de comando.
+Também é possível abrir `executar.bat`. A janela do programa permite selecionar o `.xlsx` sem passar o caminho pela linha de comando. O cálculo roda em segundo plano para a janela continuar respondendo; o resultado aparece no terminal que iniciou o programa.
 
 Execução opcional pelo terminal com caminho explícito:
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -126,7 +127,7 @@ def ler_alunos(xls: pd.ExcelFile) -> tuple[list[Aluno], list[dict]]:
     return alunos, inconsistencias
 
 
-def resolver(alunos: list[Aluno], estrutura: dict[str, dict[str, int]]) -> tuple[list[dict], dict[str, int], list[Aluno]]:
+def resolver(alunos: list[Aluno], estrutura: dict[str, dict[str, int]]) -> tuple[list[dict], dict[str, int], list[Aluno], str, float | None]:
     turmas: list[tuple[str, str, int]] = []
     letra = 0
     for periodo in ("MANHÃ", "TARDE"):
@@ -167,10 +168,15 @@ def resolver(alunos: list[Aluno], estrutura: dict[str, dict[str, int]]) -> tuple
             modelo += k[j] >= media_mulheres - meninas
     # Função objetivo conforme o rascunho: min Σk_j + Σw_j + Σu_i.
     modelo += pulp.lpSum(k.values()) + pulp.lpSum(w.values()) + pulp.lpSum(u.values())
-    modelo.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=120))
+    modelo.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=30))
     status = pulp.LpStatus[modelo.status]
-    if status != "Optimal":
-        raise ValueError(f"O solver não comprovou uma solução ótima (status: {status}). Nenhum resultado foi gravado.")
+    status_solucao = getattr(modelo, "sol_status", None)
+    solucao_viavel = status_solucao in {
+        getattr(pulp, "LpSolutionOptimal", 1),
+        getattr(pulp, "LpSolutionIntegerFeasible", 2),
+    }
+    if not solucao_viavel:
+        raise ValueError(f"O solver não encontrou uma solução viável (status: {status}).")
 
     saida = []
     nao_alocados = []
@@ -182,23 +188,35 @@ def resolver(alunos: list[Aluno], estrutura: dict[str, dict[str, int]]) -> tuple
         saida.append({"Nome": aluno.nome, "Sexo": aluno.sexo,
                       "Disponibilidade": aluno.periodo.title(), "Turma": turmas[j][1]})
     totais = {nome: sum(item["Turma"] == nome for item in saida) for _, nome, _ in turmas}
-    return saida, totais, nao_alocados
+    return saida, totais, nao_alocados, status, pulp.value(modelo.objective)
 
 
 def executar(arquivo: Path) -> str:
     with pd.ExcelFile(arquivo) as xls:
         estrutura = ler_estrutura(xls)
         alunos, inconsistencias = ler_alunos(xls)
-    saida, totais, nao_alocados = resolver(alunos, estrutura)
+    saida, totais, nao_alocados, status, objetivo = resolver(alunos, estrutura)
     for aluno in nao_alocados:
         inconsistencias.append({"Linha": aluno.linha, "Nome": aluno.nome,
                                 "Motivo": f"Sem turma: não há vaga disponível no período {aluno.periodo.title()}."})
-    # Substitui abas de saída mantendo as abas de entrada e os demais dados do workbook.
-    with pd.ExcelWriter(arquivo, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-        pd.DataFrame(saida, columns=COLUNAS_SAIDA).to_excel(writer, sheet_name=ABAS["saida"], index=False)
-        pd.DataFrame(inconsistencias, columns=["Linha", "Nome", "Motivo"]).to_excel(writer, sheet_name=ABAS["erros"], index=False)
-    resumo = "\n".join(f"{nome}: {quantidade} alunos" for nome, quantidade in totais.items())
-    return f"Ensalamento concluído: {len(saida)} alunos alocados; {len(nao_alocados)} sem turma.\n\n{resumo}\n\nInconsistências/avisos: {len(inconsistencias)}.\nResultado salvo no mesmo Excel."
+    linhas = [
+        f"Status do solver: {status}",
+        f"Valor da função objetivo: {objetivo}",
+        f"Alunos alocados: {len(saida)} | Sem turma: {len(nao_alocados)}",
+        "",
+        "DISTRIBUIÇÃO (Nome | Sexo | Disponibilidade | Turma)",
+        *[f"{r['Nome']} | {r['Sexo']} | {r['Disponibilidade']} | {r['Turma']}" for r in saida],
+        "",
+        "TOTAIS POR TURMA",
+        *[f"{nome}: {quantidade}" for nome, quantidade in totais.items()],
+    ]
+    if nao_alocados:
+        linhas.extend(["", "ALUNOS SEM TURMA", *[f"Linha {a.linha} | {a.nome} | {a.periodo.title()}" for a in nao_alocados]])
+    if inconsistencias:
+        linhas.extend(["", "INCONSISTÊNCIAS / AVISOS"])
+        linhas.extend(f"Linha {r['Linha']} | {r['Nome']} | {r['Motivo']}" for r in inconsistencias)
+    linhas.extend(["", "Modo de depuração: o arquivo Excel não foi alterado."])
+    return "\n".join(linhas)
 
 
 def interface() -> None:
@@ -210,23 +228,38 @@ def interface() -> None:
     tk.Label(janela, text="Escolha o arquivo Excel do cenário para gerar a distribuição.", font=("Segoe UI", 10)).pack(pady=4)
     status = tk.StringVar(value="Pronto para selecionar o arquivo.")
     tk.Label(janela, textvariable=status, wraplength=440, justify="center").pack(pady=12)
+    botao = tk.Button(janela, text="Selecionar Excel e ensalar", font=("Segoe UI", 11, "bold"), padx=18, pady=9)
 
     def escolher() -> None:
         caminho = filedialog.askopenfilename(title="Selecione o cenário Excel", filetypes=[("Planilhas Excel", "*.xlsx")])
         if not caminho:
             return
-        status.set("Validando dados e resolvendo o modelo...")
-        janela.update_idletasks()
-        try:
-            mensagem = executar(Path(caminho))
-            messagebox.showinfo("Concluído", mensagem)
-            status.set("Concluído. O resultado foi salvo no arquivo selecionado.")
-        except Exception as erro:
-            messagebox.showerror("Não foi possível gerar o ensalamento", str(erro))
-            status.set("Revise os dados e as inconsistências indicadas.")
+        status.set("Resolvendo. A distribuição será impressa no terminal ao concluir.")
+        botao.config(state="disabled")
 
-    tk.Button(janela, text="Selecionar Excel e ensalar", command=escolher,
-              font=("Segoe UI", 11, "bold"), padx=18, pady=9).pack(pady=4)
+        def trabalho() -> None:
+            try:
+                relatorio = executar(Path(caminho))
+                print(relatorio, flush=True)
+                janela.after(0, lambda: finalizado())
+            except Exception as erro:
+                print(f"Erro: {erro}", file=sys.stderr, flush=True)
+                janela.after(0, lambda mensagem=str(erro): falhou(mensagem))
+
+        threading.Thread(target=trabalho, daemon=True).start()
+
+    def finalizado() -> None:
+        botao.config(state="normal")
+        status.set("Concluído. Veja a distribuição e os avisos no terminal.")
+        messagebox.showinfo("Concluído", "A distribuição e os avisos foram impressos no terminal.")
+
+    def falhou(mensagem: str) -> None:
+        botao.config(state="normal")
+        status.set("Falha ao gerar distribuição. Veja o terminal.")
+        messagebox.showerror("Falha no ensalamento", mensagem)
+
+    botao.config(command=escolher)
+    botao.pack(pady=4)
     janela.mainloop()
 
 
