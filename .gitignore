@@ -4,4 +4,5 @@
 __pycache__/
 build/
 dist/
-\tests
+tests/*
+!tests/test_metricas.py

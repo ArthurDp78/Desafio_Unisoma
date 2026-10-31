@@ -1,5 +1,6 @@
 """Integração da UI desktop, cópia de trabalho e exportação sem recálculo."""
 from collections import Counter
+from dataclasses import replace
 from io import BytesIO
 import json
 import os
@@ -16,10 +17,11 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
 from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation, QTimer, Qt
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 
 from apresentacao import ResultadoInterface, exportar_planilha, processar_planilha
 import ensalamento
+from dados import Aluno
 from interface_desktop import JanelaPrincipal
 from metricas import calcular_metricas
 
@@ -83,14 +85,14 @@ class PlanilhaTest(unittest.TestCase):
         self.assertIs(argumentos["nao_alocados"], salvar.call_args.kwargs["nao_alocados"])
         self.assertNotEqual(Path(salvar.call_args.args[0]), origem.resolve())
         self.assertIsInstance(resultado.metricas, dict)
-        self.assertTrue({"resumo", "por_turno", "turmas", "situacao_turmas", "nao_alocados",
+        self.assertTrue({"resumo", "por_turno", "turmas", "nao_alocados",
                          "balanceamento", "destaques"}.issubset(resultado.metricas))
         resumo = resultado.metricas["resumo"]
         self.assertEqual(resumo["alunos_alocados"], len(resultado.distribuicao))
         self.assertEqual(resumo["alunos_sem_turma"], resultado.sem_turma)
         self.assertEqual(resumo["total_turmas"], len(resultado.grupos))
-        self.assertEqual(resumo["status_solver"], argumentos["status_solver"])
-        self.assertEqual(resumo["valor_objetivo"], argumentos["valor_objetivo"])
+        if resumo["capacidade_total"]:
+            self.assertAlmostEqual(resumo["taxa_ocupacao"] + resumo["taxa_ociosidade"], 100, delta=0.01)
         self.assertEqual(resultado.metricas, json.loads(json.dumps(resultado.metricas, allow_nan=False)))
         return resultado
 
@@ -104,8 +106,9 @@ class PlanilhaTest(unittest.TestCase):
             self.assertEqual(len(resultado.distribuicao), 4)
             self.assertEqual(resultado.sem_turma, 0)
             self.assertEqual(resultado.metricas["resumo"]["total_alunos"], 4)
-            self.assertEqual(resultado.metricas["resumo"]["status_solver"], "Optimal")
-            self.assertEqual(resultado.metricas["resumo"]["valor_objetivo"], 0.0)
+            self.assertEqual(resultado.metricas["resumo"]["taxa_ocupacao"], 66.67)
+            self.assertEqual(resultado.metricas["resumo"]["taxa_ociosidade"], 33.33)
+            self.assertEqual(resultado.metricas["resumo"]["vagas_ociosas"], 2)
             self.assertEqual(len(resultado.grupos), 3)
             self.assertEqual(sum(resultado.totais.values()), 4)
             self.assertEqual(sum(sum(v) for v in resultado.sexos.values()), 4)
@@ -139,7 +142,8 @@ class PlanilhaTest(unittest.TestCase):
             self.assertEqual(len(resultado.distribuicao), 403)
             self.assertEqual(resultado.sem_turma, 12)
             self.assertEqual(resultado.metricas["resumo"]["total_alunos"], 415)
-            self.assertEqual(resultado.metricas["resumo"]["valor_objetivo"], 36.0)
+            self.assertEqual(resultado.metricas["resumo"]["taxa_ocupacao"], 100.0)
+            self.assertEqual(resultado.metricas["resumo"]["taxa_ociosidade"], 0.0)
             self.assertEqual(resultado.metricas["nao_alocados"]["total"], 12)
             self.assertEqual(len(resultado.grupos), 2)
             self.assertNotIn("SEM TURMA", resultado.grupos)
@@ -225,10 +229,15 @@ def amostra():
         "MANHÃ - B": [],
         "TARDE - C": [{"Nome": "João", "Sexo": "M", "Disponibilidade": "Tarde", "Turma": "TARDE - C"}],
     }
-    return ResultadoInterface(Path("amostra.xlsx"), b"planilha", [r for g in grupos.values() for r in g],
+    distribuicao = [r for g in grupos.values() for r in g]
+    alunos = [Aluno(i + 2, r["Nome"], r["Sexo"], r["Disponibilidade"].upper())
+              for i, r in enumerate(distribuicao)]
+    estrutura = {"MANHÃ": {"turmas": 2, "vagas": 2}, "TARDE": {"turmas": 1, "vagas": 2}}
+    metricas = calcular_metricas(alunos, estrutura, distribuicao, [], "Optimal", None)
+    return ResultadoInterface(Path("amostra.xlsx"), b"planilha", distribuicao,
                               [{"Linha": "2, 3", "Nome": "João", "Motivo": "Nome duplicado no cadastro."}],
                               grupos, {k: len(v) for k, v in grupos.items()},
-                              {"MANHÃ - A": (1, 1), "MANHÃ - B": (0, 0), "TARDE - C": (1, 0)}, 0, {})
+                              {"MANHÃ - A": (1, 1), "MANHÃ - B": (0, 0), "TARDE - C": (1, 0)}, 0, metricas)
 
 
 class InterfaceTest(unittest.TestCase):
@@ -251,18 +260,59 @@ class InterfaceTest(unittest.TestCase):
         self.janela.deleteLater()
         self.app.processEvents()
 
-    def test_carrossel_tem_dois_dashboards_sem_recriar_widgets(self):
+    def test_dashboard_exibe_dois_graficos_sem_carrossel(self):
         w = self.janela
         w.mostrar_resultado(amostra())
         graficos = list(w.graficos)
         for _ in range(20):
-            w.mudar_dashboard(1)
-        self.assertEqual(w.paginas.count(), 2)
-        self.assertEqual(w.paginas.currentIndex(), 0)
+            w.mudar_secao(1)
+            w.mudar_secao(0)
         self.assertEqual(w.graficos, graficos)
-        w.mudar_dashboard(1)
+        self.assertTrue(all(g.isVisible() for g in w.graficos))
+        self.assertEqual(w.findChildren(QStackedWidget), [w.secoes])
+        for atributo in ("paginas", "mudar_dashboard", "pagina_dashboard", "dashboard_anterior", "dashboard_proximo"):
+            self.assertFalse(hasattr(w, atributo))
         self.assertEqual(w.graficos[1].dados["MANHÃ - B"], (0, 0))
-        self.assertEqual(w.titulo_dashboard.text(), "Homens e mulheres por turma")
+        self.assertEqual(w.graficos[0].capacidades["MANHÃ - A"], 2)
+        self.assertEqual(len(w.indicadores), 6)
+        self.assertEqual(w.detalhes_indicadores[0].text(), "de 3 alunos · 100,0%")
+        self.assertEqual(w.indicadores[3].text(), "50,0%")
+        self.assertEqual(w.indicadores[4].text(), "50,0%")
+        self.assertEqual(w.detalhes_indicadores[4].text(), "3 vagas livres")
+        self.assertEqual(w.diferencas_turmas["MANHÃ"].text(), "Manhã: até 2 alunos")
+        self.assertEqual(w.diferencas_turmas["TARDE"].text(), "Tarde: turmas com o mesmo tamanho")
+        self.assertEqual(w.variacao_genero.text(), "1 homem a mais")
+        self.assertEqual(w.resumo_turnos["MANHÃ"]["taxa_ociosidade"].text(), "50,0% · 2 vagas livres")
+
+    def test_dashboard_reorganiza_graficos_e_cards_com_rolagem(self):
+        w = self.janela
+        w.mostrar_resultado(amostra())
+        w.resize(1180, 880)
+        self.app.processEvents()
+        self.assertEqual(w.grade_graficos.colunas, 2)
+        self.assertEqual(w.grade_indicadores.colunas, 6)
+        w.resize(880, 600)
+        self.app.processEvents()
+        self.assertEqual(w.grade_graficos.colunas, 1)
+        self.assertEqual(w.grade_indicadores.colunas, 3)
+        self.assertGreater(w.dashboard.verticalScrollBar().maximum(), 0)
+        self.assertEqual(w.dashboard.horizontalScrollBar().maximum(), 0)
+        self.assertTrue(all(g.isVisible() for g in w.graficos))
+        self.assertTrue(all(p.height() == 330 for p in w.grade_graficos.widgets))
+        graficos = list(w.graficos)
+        w.resize(1180, 880)
+        self.app.processEvents()
+        self.assertEqual(w.grade_graficos.colunas, 2)
+        self.assertEqual(w.grade_indicadores.colunas, 6)
+        self.assertEqual(w.graficos, graficos)
+
+    def test_dashboard_usa_metricas_como_fonte(self):
+        resultado = amostra()
+        resultado = replace(resultado, totais={"MANHÃ - A": 999}, sexos={"MANHÃ - A": (999, 999)}, sem_turma=999)
+        self.janela.mostrar_resultado(resultado)
+        self.assertEqual(self.janela.indicadores[1].text(), "0")
+        self.assertEqual(sum(self.janela.graficos[0].dados.values()), 3)
+        self.assertEqual(self.janela.graficos[1].dados["MANHÃ - A"], (1, 1))
 
     def test_indicadores_combo_e_graficos_com_alunos_sem_turma(self):
         with tempfile.TemporaryDirectory() as pasta:
@@ -272,7 +322,8 @@ class InterfaceTest(unittest.TestCase):
         w = self.janela
         w.mostrar_resultado(resultado)
         self.assertEqual(w.indicadores[0].text(), "403")
-        self.assertEqual(w.indicadores[2].text(), "12")
+        self.assertEqual(w.indicadores[1].text(), "12")
+        self.assertEqual(w.detalhes_indicadores[0].text(), "de 415 alunos · 97,1%")
         self.assertEqual([w.turma.itemText(i) for i in range(w.turma.count())], list(resultado.grupos))
         self.assertNotIn("SEM TURMA", w.graficos[0].dados)
         self.assertNotIn("SEM TURMA", w.graficos[1].dados)
@@ -315,7 +366,6 @@ class InterfaceTest(unittest.TestCase):
         w.mostrar_resultado(amostra())
         widgets = [w.secoes.widget(i) for i in range(3)]
         modelo = w.modelo
-        w.mudar_dashboard(1)
         w.mudar_secao(1)
         w.busca.setText("agata")
         reset = QSignalSpy(w.modelo.modelReset)
@@ -329,7 +379,6 @@ class InterfaceTest(unittest.TestCase):
         self.assertEqual(reset.count(), 0)
         self.assertEqual(w.busca.text(), "agata")
         self.assertEqual(w.filtro.rowCount(), 1)
-        self.assertEqual(w.paginas.currentIndex(), 1)
         self.assertEqual([p.isVisible() for p in widgets], [False, True, False])
         self.assertGreater(w.tabela.viewport().height(), 300)
         w.mudar_secao(2)

@@ -16,6 +16,30 @@ from dados import criar_turmas
 from metricas import calcular_metricas
 
 
+def formatar_percentual(valor: float) -> str:
+    return f"{valor:.1f}%".replace(".", ",")
+
+
+def texto_diferenca_turmas(amplitude: int) -> str:
+    if amplitude == 0:
+        return "turmas com o mesmo tamanho"
+    return f"até {amplitude} {'aluno' if amplitude == 1 else 'alunos'}"
+
+
+def texto_variacao_genero(variacao: dict) -> str:
+    """Descreve todos os sentidos empatados, sem avaliar a distribuição."""
+    if not variacao["turmas"]:
+        return "Sem turmas"
+    if variacao["quantidade"] == 0:
+        return "Equilibrado"
+    quantidade = variacao["quantidade"]
+    textos = []
+    for categoria in variacao["predominancias"]:
+        nome = {"mulheres": "mulher", "homens": "homem"}[categoria] if quantidade == 1 else categoria
+        textos.append(f"{quantidade} {nome} a mais")
+    return " · ".join(textos)
+
+
 def texto_busca(texto: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", texto.casefold())
                    if not unicodedata.combining(c))

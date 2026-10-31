@@ -8,12 +8,15 @@ import sys
 from PySide6.QtCore import QAbstractTableModel, QEasingCurve, QModelIndex, QPropertyAnimation, QRect, QRectF, QSortFilterProxyModel, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
+    QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLayout,
     QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea, QSizePolicy, QStackedWidget, QTableView, QVBoxLayout, QWidget,
 )
 
-from apresentacao import ResultadoInterface, exportar_planilha, processar_planilha, texto_busca
+from apresentacao import (
+    ResultadoInterface, exportar_planilha, formatar_percentual, processar_planilha,
+    texto_busca, texto_diferenca_turmas, texto_variacao_genero,
+)
 
 AZUL = "#3D73C6"
 VERDE = "#258B70"
@@ -184,6 +187,39 @@ class Tarefa(QThread):
             self.falhou.emit(str(erro))
 
 
+class GradeResponsiva(QWidget):
+    """Reposiciona os mesmos widgets conforme a largura, sem recriá-los."""
+
+    def __init__(self, widgets, largura_coluna, opcoes=(2, 1)):
+        super().__init__()
+        self.widgets = widgets
+        self.largura_coluna = largura_coluna
+        self.opcoes = opcoes
+        self.colunas = 0
+        self.grade = QGridLayout(self)
+        self.grade.setContentsMargins(0, 0, 0, 0)
+        self.grade.setSpacing(12)
+        self.grade.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self._organizar()
+
+    def _organizar(self):
+        colunas = next((n for n in self.opcoes if self.width() >= n * self.largura_coluna + (n - 1) * 12), 1)
+        if colunas == self.colunas:
+            return
+        while self.grade.count():
+            self.grade.takeAt(0)
+        for coluna in range(max(self.opcoes)):
+            self.grade.setColumnStretch(coluna, int(coluna < colunas))
+        for indice, widget in enumerate(self.widgets):
+            self.grade.addWidget(widget, indice // colunas, indice % colunas)
+        self.colunas = colunas
+        self.updateGeometry()
+
+    def resizeEvent(self, evento):
+        super().resizeEvent(evento)
+        self._organizar()
+
+
 class Grafico(QWidget):
     turma_clicada = Signal(str)
 
@@ -191,15 +227,17 @@ class Grafico(QWidget):
         super().__init__(parent)
         self.por_sexo = por_sexo
         self.dados = {}
+        self.capacidades = {}
         self.selecionada = ""
         self.areas = []
         self.setAutoFillBackground(True)
         self.setAccessibleName("Homens e mulheres por turma" if por_sexo else "Número de alunos por turma")
         self.setMinimumHeight(160)
 
-    def definir(self, dados):
+    def definir(self, dados, capacidades=None):
         self.dados = dados
-        self.setMinimumHeight(max(160, len(dados) * (40 if self.por_sexo else 30) + 34))
+        self.capacidades = capacidades or {}
+        self.setMinimumHeight(max(160, len(dados) * (44 if self.por_sexo else 32) + 34))
         self.update()
 
     def selecionar(self, turma):
@@ -218,11 +256,12 @@ class Grafico(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         metricas = painter.fontMetrics()
         esquerda = max(metricas.horizontalAdvance(nome) for nome in self.dados) + 18
-        direita = max(esquerda + 100, self.width() - 45)
+        direita = max(esquerda + 60, self.width() - (45 if self.por_sexo else 90))
         largura = direita - esquerda
-        minimo = 40 if self.por_sexo else 30
-        altura_linha = max(minimo, min(96, (self.height() - 40) / len(self.dados)))
+        minimo = 44 if self.por_sexo else 32
+        altura_linha = max(minimo, min(54, (self.height() - 40) / len(self.dados)))
         valores = [v for par in self.dados.values() for v in par] if self.por_sexo else list(self.dados.values())
+        valores += list(self.capacidades.values())
         passo = max(1, ceil(max(valores, default=0) / 4))
         maximo = passo * 4
         base = len(self.dados) * altura_linha + 8
@@ -243,17 +282,24 @@ class Grafico(QWidget):
             painter.setPen(QColor(TEXTO))
             painter.drawText(QRectF(7, y, esquerda - 17, altura_linha), Qt.AlignmentFlag.AlignVCenter, nome)
             barras = ((valor[0], AZUL), (valor[1], VERDE)) if self.por_sexo else ((valor, AZUL if nome.startswith("MANHÃ") else VERDE),)
+            if not self.por_sexo and nome in self.capacidades:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor("#EAF0F8"))
+                painter.drawRoundedRect(QRectF(esquerda, y + altura_linha / 2 - 9,
+                                              self.capacidades[nome] / maximo * largura, 18), 3, 3)
             for j, (quantidade, cor) in enumerate(barras):
-                altura = 16 if self.por_sexo else 24
-                topo = y + altura_linha / 2 - (19 if self.por_sexo else 12) + j * 22
+                altura = 14 if self.por_sexo else 18
+                topo = y + altura_linha / 2 - (17 if self.por_sexo else 9) + j * 20
                 tamanho = quantidade / maximo * largura
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QColor(cor))
                 if quantidade:
                     painter.drawRoundedRect(QRectF(esquerda, topo, tamanho, altura), 3, 3)
                 painter.setPen(QColor(cor))
-                painter.drawText(QRectF(esquerda + tamanho + 7, topo - 4, 40, altura + 8),
-                                 Qt.AlignmentFlag.AlignVCenter, str(quantidade))
+                rotulo = f"{quantidade} / {self.capacidades[nome]}" if nome in self.capacidades else str(quantidade)
+                x_rotulo = esquerda + tamanho + 7 if self.por_sexo else direita + 8
+                painter.drawText(QRectF(x_rotulo, topo - 4, 80 if not self.por_sexo else 40, altura + 8),
+                                 Qt.AlignmentFlag.AlignVCenter, rotulo)
 
     def mousePressEvent(self, evento):
         if evento.button() == Qt.MouseButton.LeftButton:
@@ -332,60 +378,12 @@ class JanelaPrincipal(QMainWindow):
         acoes.addWidget(self.exportar)
         linha_arquivo.addLayout(acoes)
         principal.addWidget(arquivo)
-        indicadores = QHBoxLayout()
-        indicadores.setSpacing(12)
-        self.indicadores = []
-        for titulo, fundo, cor in (("Alunos distribuídos", "#E1F3EB", "#207655"),
-                                   ("Turmas", "#E3EDFC", "#315F9E"),
-                                   ("Alunos sem turma", "#FCF0C7", "#86691E"),
-                                   ("Inconsistências / avisos", "#FCF0C7", "#86691E")):
-            frame = QFrame()
-            frame.setStyleSheet(f"QFrame {{background:{fundo};border:1px solid {fundo};border-radius:12px;}} QLabel {{color:{cor};border:none;}}")
-            layout = QHBoxLayout(frame)
-            layout.setContentsMargins(15, 11, 15, 11)
-            legenda = QLabel(titulo)
-            legenda.setWordWrap(True)
-            layout.addWidget(legenda, 1)
-            numero = QLabel("—")
-            numero.setStyleSheet("font-size:25px;font-weight:600;")
-            layout.addWidget(numero)
-            self.indicadores.append(numero)
-            indicadores.addWidget(frame, 1)
-        principal.addLayout(indicadores)
         self.navegacao = NavegacaoSecoes()
         principal.addWidget(self.navegacao)
         self.secoes = QStackedWidget()
         self.secoes.setAccessibleName("Seção principal")
         self.navegacao.secao_alterada.connect(self.secoes.setCurrentIndex)
-        dashboard, layout_dashboard = self._painel()
-        dashboard.setMinimumHeight(225)
-        navegacao = QHBoxLayout()
-        self.titulo_dashboard = self._rotulo("Alunos por turma", "secao")
-        navegacao.addWidget(self.titulo_dashboard, 1)
-        self.legenda = self._rotulo("Azul: manhã   ·   Verde: tarde")
-        navegacao.addWidget(self.legenda)
-        self.dashboard_anterior = QPushButton("‹")
-        self.dashboard_anterior.setAccessibleName("Dashboard anterior")
-        self.dashboard_anterior.clicked.connect(lambda: self.mudar_dashboard(-1))
-        self.dashboard_proximo = QPushButton("›")
-        self.dashboard_proximo.setAccessibleName("Próximo dashboard")
-        self.dashboard_proximo.clicked.connect(lambda: self.mudar_dashboard(1))
-        self.pagina_dashboard = self._rotulo("1 / 2")
-        navegacao.addWidget(self.dashboard_anterior)
-        navegacao.addWidget(self.pagina_dashboard)
-        navegacao.addWidget(self.dashboard_proximo)
-        layout_dashboard.addLayout(navegacao)
-        self.paginas = QStackedWidget()
-        self.graficos = [Grafico(), Grafico(por_sexo=True)]
-        for grafico in self.graficos:
-            area = QScrollArea()
-            area.setWidgetResizable(True)
-            area.setFrameShape(QFrame.Shape.NoFrame)
-            area.setWidget(grafico)
-            self.paginas.addWidget(area)
-            grafico.turma_clicada.connect(self.ir_para_turma)
-        layout_dashboard.addWidget(self.paginas, 1)
-        self.secoes.addWidget(dashboard)
+        self.secoes.addWidget(self._montar_dashboard())
         alunos, layout_alunos = self._painel()
         alunos.setMinimumSize(360, 200)
         linha_turma = QHBoxLayout()
@@ -457,6 +455,113 @@ class JanelaPrincipal(QMainWindow):
         principal.addWidget(self.progresso)
         self._atualizar_botoes()
 
+    def _montar_dashboard(self):
+        self.dashboard = QScrollArea()
+        self.dashboard.setWidgetResizable(True)
+        self.dashboard.setFrameShape(QFrame.Shape.NoFrame)
+        self.dashboard.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.dashboard.setAccessibleName("Painel de gestão com rolagem vertical")
+        conteudo = QWidget()
+        conteudo.setObjectName("central")
+        layout = QVBoxLayout(conteudo)
+        layout.setContentsMargins(0, 0, 4, 0)
+        layout.setSpacing(13)
+        layout.addWidget(self._rotulo("Resumo", "secao"))
+        cards = []
+        self.indicadores, self.detalhes_indicadores = [], []
+        for titulo, fundo, cor in (
+            ("Alunos distribuídos", "#E1F3EB", "#207655"),
+            ("Alunos sem turma", "#FCF0C7", "#86691E"),
+            ("Turmas", "#E3EDFC", "#315F9E"),
+            ("Ocupação", "#E1F3EB", "#207655"),
+            ("Ociosidade", "#E3EDFC", "#315F9E"),
+            ("Inconsistências / avisos", "#FCF0C7", "#86691E"),
+        ):
+            frame = QFrame()
+            frame.setStyleSheet(f"QFrame {{background:{fundo};border:1px solid {fundo};border-radius:12px;}} QLabel {{color:{cor};border:none;}}")
+            caixa = QVBoxLayout(frame)
+            caixa.setContentsMargins(14, 11, 14, 11)
+            caixa.setSpacing(4)
+            legenda = QLabel(titulo)
+            legenda.setWordWrap(True)
+            caixa.addWidget(legenda)
+            numero = QLabel("—")
+            numero.setStyleSheet("font-size:25px;font-weight:600;")
+            caixa.addWidget(numero)
+            detalhe = self._rotulo("")
+            detalhe.setWordWrap(True)
+            caixa.addWidget(detalhe)
+            self.indicadores.append(numero)
+            self.detalhes_indicadores.append(detalhe)
+            cards.append(frame)
+        self.grade_indicadores = GradeResponsiva(cards, 170, (6, 3, 2, 1))
+        layout.addWidget(self.grade_indicadores)
+
+        self.graficos = [Grafico(), Grafico(por_sexo=True)]
+        paineis = []
+        for grafico, titulo, legenda in zip(self.graficos,
+                ("Alunos por turma", "Homens e mulheres por turma"),
+                ("Alunos / capacidade · Azul: manhã · Verde: tarde", "Azul: homens · Verde: mulheres")):
+            painel, caixa = self._painel()
+            painel.setFixedHeight(330)
+            rotulo = self._rotulo(titulo, "secao")
+            rotulo.setWordWrap(True)
+            caixa.addWidget(rotulo)
+            rotulo = self._rotulo(legenda)
+            rotulo.setWordWrap(True)
+            caixa.addWidget(rotulo)
+            area = QScrollArea()
+            area.setWidgetResizable(True)
+            area.setFrameShape(QFrame.Shape.NoFrame)
+            area.setWidget(grafico)
+            caixa.addWidget(area, 1)
+            grafico.turma_clicada.connect(self.ir_para_turma)
+            paineis.append(painel)
+        self.grade_graficos = GradeResponsiva(paineis, 480)
+        layout.addWidget(self.grade_graficos)
+
+        qualidade, caixa = self._painel()
+        caixa.addWidget(self._rotulo("Qualidade da distribuição", "secao"))
+        caixa.addWidget(QLabel("Diferença entre turmas"))
+        self.diferencas_turmas = {}
+        for turno in ("MANHÃ", "TARDE"):
+            rotulo = QLabel(f"{turno.title()}: —")
+            rotulo.setWordWrap(True)
+            caixa.addWidget(rotulo)
+            self.diferencas_turmas[turno] = rotulo
+        caixa.addWidget(QLabel("Maior variação H/M"))
+        self.variacao_genero = QLabel("—")
+        self.variacao_genero.setWordWrap(True)
+        caixa.addWidget(self.variacao_genero)
+        caixa.addStretch()
+
+        resumo_turnos, caixa = self._painel()
+        caixa.addWidget(self._rotulo("Resumo por turno", "secao"))
+        grade = QGridLayout()
+        grade.setHorizontalSpacing(12)
+        grade.setVerticalSpacing(9)
+        self.resumo_turnos = {turno: {} for turno in ("MANHÃ", "TARDE")}
+        for coluna, turno in enumerate(self.resumo_turnos, 1):
+            grade.addWidget(QLabel(turno.title()), 0, coluna)
+            grade.setColumnStretch(coluna, 1)
+        for linha, (chave, texto) in enumerate((
+            ("alunos_disponiveis", "Alunos"), ("alunos_alocados", "Alocados"),
+            ("alunos_sem_turma", "Sem turma"), ("capacidade_total", "Capacidade"),
+            ("taxa_ocupacao", "Ocupação"), ("taxa_ociosidade", "Ociosidade"),
+        ), 1):
+            grade.addWidget(QLabel(texto), linha, 0)
+            for coluna, turno in enumerate(self.resumo_turnos, 1):
+                rotulo = QLabel("—")
+                rotulo.setWordWrap(True)
+                grade.addWidget(rotulo, linha, coluna)
+                self.resumo_turnos[turno][chave] = rotulo
+        caixa.addLayout(grade)
+        self.grade_resumos = GradeResponsiva([qualidade, resumo_turnos], 390)
+        layout.addWidget(self.grade_resumos)
+        layout.addStretch()
+        self.dashboard.setWidget(conteudo)
+        return self.dashboard
+
     def _atualizar_botoes(self):
         self.importar.setEnabled(not self._ocupado)
         self.gerar.setEnabled(self.arquivo is not None and not self._ocupado)
@@ -483,8 +588,18 @@ class JanelaPrincipal(QMainWindow):
         self.busca.clear()
         for numero in self.indicadores:
             numero.setText("—")
+        for detalhe in self.detalhes_indicadores:
+            detalhe.clear()
         for grafico in self.graficos:
             grafico.definir({})
+        for turno, rotulo in self.diferencas_turmas.items():
+            rotulo.setText(f"{turno.title()}: —")
+        self.variacao_genero.setText("—")
+        self.variacao_genero.setToolTip("")
+        for valores in self.resumo_turnos.values():
+            for rotulo in valores.values():
+                rotulo.setText("—")
+        self.dashboard.verticalScrollBar().setValue(0)
         self.relatorio.setPlainText("Nenhuma distribuição realizada para esta planilha.")
         self.contagem.setText("Sem distribuição.")
         self.status.setText("Planilha selecionada.")
@@ -510,11 +625,7 @@ class JanelaPrincipal(QMainWindow):
 
     def mostrar_resultado(self, resultado: ResultadoInterface):
         self.resultado = resultado
-        for rotulo, valor in zip(self.indicadores, (len(resultado.distribuicao), len(resultado.grupos),
-                                                   resultado.sem_turma, len(resultado.inconsistencias))):
-            rotulo.setText(str(valor))
-        self.graficos[0].definir(resultado.totais)
-        self.graficos[1].definir(resultado.sexos)
+        self._mostrar_dashboard(resultado.metricas, len(resultado.inconsistencias))
         self.turma.blockSignals(True)
         self.turma.clear()
         self.turma.addItems(list(resultado.grupos))
@@ -523,6 +634,38 @@ class JanelaPrincipal(QMainWindow):
         self.relatorio.setPlainText(resultado.relatorio())
         self.status.setText("Distribuição concluída. A planilha original ainda não foi alterada.")
         self._atualizar_botoes()
+
+    def _mostrar_dashboard(self, metricas, avisos):
+        resumo = metricas["resumo"]
+        for rotulo, valor in zip(self.indicadores, (
+            resumo["alunos_alocados"], resumo["alunos_sem_turma"], resumo["total_turmas"],
+            formatar_percentual(resumo["taxa_ocupacao"]), formatar_percentual(resumo["taxa_ociosidade"]), avisos,
+        )):
+            rotulo.setText(str(valor))
+        self.detalhes_indicadores[0].setText(
+            f"de {resumo['total_alunos']} alunos · {formatar_percentual(resumo['percentual_alocados'])}"
+        )
+        self.detalhes_indicadores[4].setText(f"{resumo['vagas_ociosas']} vagas livres")
+        turmas = metricas["turmas"]
+        self.graficos[0].definir({t["nome"]: t["total_alunos"] for t in turmas},
+                                 {t["nome"]: t["capacidade"] for t in turmas})
+        self.graficos[1].definir({t["nome"]: (t["homens"], t["mulheres"]) for t in turmas})
+        for turno, rotulo in self.diferencas_turmas.items():
+            amplitude = metricas["balanceamento"][turno]["alunos"]["amplitude"]
+            rotulo.setText(f"{turno.title()}: {texto_diferenca_turmas(amplitude)}")
+        variacao = metricas["destaques"]["variacao_genero"]
+        self.variacao_genero.setText(texto_variacao_genero(variacao))
+        self.variacao_genero.setToolTip(", ".join(variacao["turmas"]))
+        for turno, rotulos in self.resumo_turnos.items():
+            dados = metricas["por_turno"][turno]
+            for chave, rotulo in rotulos.items():
+                if chave == "taxa_ociosidade":
+                    texto = f"{formatar_percentual(dados[chave])} · {dados['vagas_ociosas']} vagas livres"
+                elif chave == "taxa_ocupacao":
+                    texto = formatar_percentual(dados[chave])
+                else:
+                    texto = str(dados[chave])
+                rotulo.setText(texto)
 
     def mostrar_turma(self, nome):
         self.busca.clear()
@@ -550,13 +693,6 @@ class JanelaPrincipal(QMainWindow):
             self.turma.setCurrentText(nome)
             self.busca.clear()
             self.mudar_secao(1)
-
-    def mudar_dashboard(self, passo):
-        pagina = (self.paginas.currentIndex() + passo) % 2
-        self.paginas.setCurrentIndex(pagina)
-        self.pagina_dashboard.setText(f"{pagina + 1} / 2")
-        self.titulo_dashboard.setText("Homens e mulheres por turma" if pagina else "Alunos por turma")
-        self.legenda.setText("Azul: homens   ·   Verde: mulheres" if pagina else "Azul: manhã   ·   Verde: tarde")
 
     def escolher_destino(self):
         if self.resultado is None or self._ocupado:

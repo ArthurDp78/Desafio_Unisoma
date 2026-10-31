@@ -65,17 +65,43 @@ A execução pelo terminal com caminho explícito mantém o comportamento origin
 ## Interface desktop
 
 - Importar XLSX, gerar a distribuição e exportar o workbook completo.
-- Carrossel com dois dashboards: número de alunos por turma e comparação entre homens e mulheres em cada turma. As setas alternam os gráficos; clicar numa linha do gráfico seleciona a turma correspondente.
+- Dashboard em uma única página com rolagem vertical: seis cards de resumo, gráficos compactos de alunos/capacidade e homens/mulheres, qualidade da distribuição e resumo por turno. Os gráficos ficam lado a lado em telas largas e em uma coluna em telas menores; clicar numa linha seleciona a turma correspondente.
 - Lista de uma turma por vez, com seletor, setas e busca por nome que ignora caixa e acentos. As contagens dos dashboards não são alteradas pela busca.
 - Relatório de inconsistências da instância, agrupado por tipo de ocorrência, com nome, aba de origem, linhas e motivo completo, incluindo os avisos de normalização.
-- Três seções selecionáveis: **Dashboards**, **Alunos por turma** e **Inconsistências**. Só uma ocupa a área principal de cada vez. As teclas **Alt+1**, **Alt+2** e **Alt+3** também alternam entre elas. Busca, turma selecionada e página do carrossel são preservadas ao trocar de seção.
+- Três seções selecionáveis: **Dashboards**, **Alunos por turma** e **Inconsistências**. Só uma ocupa a área principal de cada vez. As teclas **Alt+1**, **Alt+2** e **Alt+3** também alternam entre elas. Busca e turma selecionada são preservadas ao trocar de seção.
 - Em janelas pequenas, a área externa permite rolagem sem comprimir a tabela até esconder suas linhas.
 
-A interface usa Qt/PySide6 Essentials, sem navegador ou servidor. A tabela usa model/view, sem criar um widget por aluno. Os três painéis e os dois gráficos permanecem montados, com exibição exclusiva por `QStackedWidget`. Trocar de seção não recalcula dados nem reinicia o modelo da tabela. A única animação decorativa move o pequeno marcador da navegação por 120 ms; não aplica efeitos de opacidade, sombra ou movimento à tabela, ao relatório ou aos gráficos. Uma nova seleção interrompe e reaproveita a mesma animação. As cores azuis, verdes e amarelas e os contornos arredondados são estáticos.
+A interface usa Qt/PySide6 Essentials, sem navegador ou servidor. A tabela usa model/view, sem criar um widget por aluno. Os três painéis e os dois gráficos permanecem montados; `QStackedWidget` alterna somente as seções principais. Os dois gráficos do dashboard aparecem simultaneamente, com rolagem própria quando há muitas turmas. Trocar de seção não recalcula dados nem reinicia o modelo da tabela. A única animação decorativa move o pequeno marcador da navegação por 120 ms; não aplica efeitos de opacidade, sombra ou movimento à tabela, ao relatório ou aos gráficos. Uma nova seleção interrompe e reaproveita a mesma animação. As cores azuis, verdes e amarelas e os contornos arredondados são estáticos.
 
 Leitura, resolução e exportação rodam fora da thread da interface. Durante uma operação, importar, calcular e exportar ficam bloqueados para impedir resultados de instâncias diferentes na mesma tela; navegar pelas seções continua disponível. O fechamento aguarda a operação em andamento.
 
 `ensalamento.py` mantém as funções de leitura, validação, modelo e gravação; apenas o ponto de entrada gráfico foi substituído. `apresentacao.py` adapta os resultados da rotina original para a tela e mantém o workbook processado para exportação. `interface_desktop.py` contém a interface Qt.
+
+### Métricas do painel
+
+`ResultadoInterface.metricas`, produzido por `metricas.calcular_metricas`, é a
+fonte dos dados do dashboard e pode ser serializado em JSON. O módulo analisa a
+solução existente, sem chamar o solver novamente. Retorna `resumo`, `por_turno`,
+`turmas`, `balanceamento`, `nao_alocados` e `destaques`.
+
+Ocupação e ociosidade são calculadas na camada de métricas, globalmente e por
+turno. A soma das taxas é 100% quando existe capacidade; ambas são zero quando
+não há capacidade. Os cálculos mantêm a precisão até o retorno, com duas casas
+decimais; a tela formata percentuais com uma casa e vírgula decimal.
+
+`balanceamento[turno]["alunos"]` contém apenas `minimo`, `maximo` e `amplitude`,
+sempre dentro do próprio turno. Cada turma tem `diferenca_genero` (mulheres menos
+homens). `destaques["variacao_genero"]` informa a maior diferença absoluta,
+as turmas empatadas e os sentidos encontrados (`mulheres`, `homens` ou
+`equilibrado`). Em empates com sentidos opostos, a tela mostra ambos, sem
+classificar a distribuição como boa ou ruim.
+
+Foram retirados os cálculos de dispersão, médias de referência do modelo,
+percentuais de gênero e destaques sem uso no painel. Status e objetivo continuam
+disponíveis em `ResultadoExecucao`; os parâmetros correspondentes de
+`calcular_metricas` são mantidos por compatibilidade, mas não entram no retorno
+de gestão. A lista de não alocados preserva nome, sexo e disponibilidade; esses
+alunos não entram nos grupos nem nos gráficos de turmas.
 
 ## Instalação e execução no Windows
 
@@ -119,7 +145,7 @@ No Windows, o pacote também exclui cópias de ICU encontradas no `PATH` de outr
 python -m unittest discover -s tests -v
 ```
 
-Os testes verificam preservação da entrada e das abas adicionais, exportação sem recálculo, falhas de escrita, navegação entre turmas e seções, preservação da busca, área útil dos painéis, término da animação curta, carrossel, tabela com 10.000 registros e processamento com eventos da interface ativos. As verificações não representam uma garantia de taxa de quadros em qualquer máquina.
+Os testes verificam métricas e taxas de ocupação/ociosidade, amplitude por turno, variação H/M e empates, dashboard sem carrossel, reorganização dos cards e gráficos em telas menores, preservação da entrada e das abas adicionais, exportação sem recálculo, falhas de escrita, navegação entre turmas e seções, preservação da busca, área útil dos painéis, término da animação curta, tabela com 10.000 registros e processamento com eventos da interface ativos. As verificações não representam uma garantia de taxa de quadros em qualquer máquina.
 
 ## Conteúdo desta pasta
 
@@ -135,6 +161,8 @@ Dados/
 ensalamento.py
 apresentacao.py
 interface_desktop.py
+metricas.py
+dados.py
 ABC_Aprendiz.spec
 executar.bat
 gerar_executavel.bat
@@ -142,6 +170,7 @@ requirements.txt
 requirements-dev.txt
 tests/
   test_desktop.py
+  test_metricas.py
 README.md
 ```
 

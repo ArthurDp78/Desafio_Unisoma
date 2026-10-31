@@ -40,9 +40,9 @@ def main():
         QTest.qWait(160)
         assert janela.grab().save(str(pasta / f"{nome}.png"))
     janela.mudar_secao(0)
-    janela.mudar_dashboard(1)
+    janela.resize(880, 600)
     QTest.qWait(160)
-    assert janela.grab().save(str(pasta / "dashboard_sexos.png"))
+    assert janela.grab().save(str(pasta / "dashboard_compacto.png"))
     tempos = []
     for i in range(60):
         inicio = perf_counter()
