@@ -17,7 +17,7 @@ Aplicação em Python para distribuir os alunos matriculados nas turmas disponí
 - Cada aluno válido é alocado em no máximo uma turma; se não receber turma, `u_i=1` registra essa situação.
 - Disponibilidade de manhã só permite turma de manhã; disponibilidade à tarde só permite turma da tarde.
 - Cada turma respeita o limite de vagas informado na aba **Turmas**.
-- Um aluno pode ficar sem turma quando faltarem vagas; o modelo minimiza a quantidade de alunos sem alocação e os reporta na aba **Inconsistências**.
+- Um aluno pode ficar sem turma quando faltarem vagas; ele aparece na aba **Ensalamento** com `SEM TURMA` na coluna `Turma` e também é reportado na aba **Inconsistências**.
 - A nomenclatura é contínua entre os períodos: as turmas da manhã recebem as primeiras letras e as da tarde continuam a sequência, no padrão `MANHÃ - A`, `MANHÃ - B`, `TARDE - C` etc.
 - As linhas de alunos com nomes repetidos são preservadas como registros distintos e incluídas no ensalamento; o nome duplicado é reportado como aviso, pois pode ser homônimo ou erro cadastral.
 
@@ -54,7 +54,7 @@ Os parâmetros são lidos do Excel em cada execução; não ficam fixos no códi
 
 ## Arquivos de saída
 
-- **Ensalamento**: colunas na ordem `Nome`, `Sexo`, `Disponibilidade`, `Turma`.
+- **Ensalamento**: colunas na ordem `Nome`, `Sexo`, `Disponibilidade`, `Turma`. Inclui todos os alunos válidos: os alocados recebem o nome da turma e os sem vaga recebem `SEM TURMA`.
 - **Inconsistências**: colunas `Linha`, `Nome`, `Motivo`; registra valores normalizados, registros inválidos, nomes repetidos e alunos sem turma.
 
 O resultado é gravado no mesmo arquivo selecionado, atualizando apenas `Ensalamento` e `Inconsistências` após o status `Optimal`. As normalizações são feitas em memória e aparecem na saída; os dados originais de `Alunos` e `Turmas` são preservados. O programa salva primeiro em um arquivo temporário e só substitui o arquivo selecionado depois de salvar o workbook completo. Feche o arquivo no Excel antes da execução.

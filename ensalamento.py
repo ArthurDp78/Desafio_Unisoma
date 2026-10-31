@@ -212,8 +212,18 @@ def _escrever_aba(wb, nome: str, cabecalhos: list[str], linhas: list[list[object
     ws.auto_filter.ref = f"A1:{ws.cell(row=max(len(linhas) + 1, 1), column=len(cabecalhos)).coordinate}"
 
 
-def salvar_resultado_excel(arquivo: Path, saida: list[dict], inconsistencias: list[dict]) -> None:
-    """Atualiza apenas Ensalamento e Inconsistências; preserva os dados de entrada."""
+def salvar_resultado_excel(
+    arquivo: Path,
+    saida: list[dict],
+    inconsistencias: list[dict],
+    nao_alocados: list[Aluno] | None = None,
+) -> None:
+    """Grava alocados e alunos sem vaga, preservando os dados de entrada.
+
+    Os não alocados aparecem em Ensalamento com Turma="SEM TURMA". A lista
+    ``saida`` do solver continua contendo apenas os alocados, para preservar
+    os totais e as métricas da solução.
+    """
     caminho = Path(arquivo)
     workbook = load_workbook(caminho)
     temporario: Path | None = None
@@ -222,7 +232,9 @@ def salvar_resultado_excel(arquivo: Path, saida: list[dict], inconsistencias: li
             raise ValueError("A aba 'Alunos' não existe no arquivo selecionado.")
         _escrever_aba(
             workbook, ABAS["saida"], COLUNAS_SAIDA,
-            [[registro[coluna] for coluna in COLUNAS_SAIDA] for registro in saida],
+            [[registro[coluna] for coluna in COLUNAS_SAIDA] for registro in saida]
+            + [[aluno.nome, aluno.sexo, aluno.periodo.title(), "SEM TURMA"]
+               for aluno in (nao_alocados or [])],
         )
         _escrever_aba(
             workbook, ABAS["erros"], ["Linha", "Nome", "Motivo"],
@@ -275,7 +287,7 @@ def executar(arquivo: Path) -> str:
             "O Excel não foi alterado; tente novamente ou reveja o tempo de resolução."
         )
 
-    salvar_resultado_excel(arquivo, saida, inconsistencias)
+    salvar_resultado_excel(arquivo, saida, inconsistencias, nao_alocados=nao_alocados)
     return (
         f"Ensalamento concluído e salvo no Excel.\n"
         f"Alunos alocados: {len(saida)} | Sem turma: {len(nao_alocados)}\n"
