@@ -1,1 +1,6 @@
 \.venv
+.venv-ui/
+.python-runtime/
+__pycache__/
+build/
+dist/

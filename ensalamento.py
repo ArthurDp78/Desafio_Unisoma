@@ -2,14 +2,11 @@
 from __future__ import annotations
 
 import sys
-import threading
 import unicodedata
 import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-import tkinter as tk
-from tkinter import filedialog, messagebox
 
 import pandas as pd
 import pulp
@@ -296,45 +293,9 @@ def executar(arquivo: Path) -> str:
 
 
 def interface() -> None:
-    janela = tk.Tk()
-    janela.title("Ensalamento — ABC Aprendiz")
-    janela.geometry("490x220")
-    janela.resizable(False, False)
-    tk.Label(janela, text="Ensalamento ABC Aprendiz", font=("Segoe UI", 17, "bold")).pack(pady=(24, 8))
-    tk.Label(janela, text="Escolha o arquivo Excel do cenário para gerar a distribuição.", font=("Segoe UI", 10)).pack(pady=4)
-    status = tk.StringVar(value="Pronto para selecionar o arquivo.")
-    tk.Label(janela, textvariable=status, wraplength=440, justify="center").pack(pady=12)
-    botao = tk.Button(janela, text="Selecionar Excel e ensalar", font=("Segoe UI", 11, "bold"), padx=18, pady=9)
+    from interface_desktop import iniciar
 
-    def escolher() -> None:
-        caminho = filedialog.askopenfilename(title="Selecione o cenário Excel", filetypes=[("Planilhas Excel", "*.xlsx")])
-        if not caminho:
-            return
-        status.set("Validando os dados e gerando o ensalamento no arquivo selecionado...")
-        botao.config(state="disabled")
-
-        def trabalho() -> None:
-            try:
-                relatorio = executar(Path(caminho))
-                janela.after(0, lambda: finalizado(relatorio))
-            except Exception as erro:
-                janela.after(0, lambda mensagem=str(erro): falhou(mensagem))
-
-        threading.Thread(target=trabalho, daemon=True).start()
-
-    def finalizado(mensagem: str) -> None:
-        botao.config(state="normal")
-        status.set("Concluído. Resultado e inconsistências salvos no Excel selecionado.")
-        messagebox.showinfo("Ensalamento concluído", mensagem)
-
-    def falhou(mensagem: str) -> None:
-        botao.config(state="normal")
-        status.set("O ensalamento não foi gravado. Revise a mensagem e o arquivo selecionado.")
-        messagebox.showerror("Falha no ensalamento", mensagem)
-
-    botao.config(command=escolher)
-    botao.pack(pady=4)
-    janela.mainloop()
+    iniciar()
 
 
 if __name__ == "__main__":
