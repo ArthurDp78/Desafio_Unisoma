@@ -4,6 +4,8 @@ from __future__ import annotations
 import sys
 import threading
 import unicodedata
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 import tkinter as tk
@@ -11,6 +13,7 @@ from tkinter import filedialog, messagebox
 
 import pandas as pd
 import pulp
+from openpyxl import load_workbook
 
 
 ABAS = {"alunos": "Alunos", "turmas": "Turmas", "saida": "Ensalamento", "erros": "Inconsistências"}
@@ -102,6 +105,8 @@ def ler_alunos(xls: pd.ExcelFile) -> tuple[list[Aluno], list[dict]]:
         if not nome and sexo is None and periodo is None:
             continue  # linhas totalmente vazias do template não são registros de aluno
         problemas = []
+        if nome and not pd.isna(linha["Nome"]) and str(linha["Nome"]) != nome:
+            problemas.append(f"Nome normalizado de '{linha['Nome']}' para '{nome}'.")
         if not nome:
             problemas.append("Nome ausente; registro não foi alocado.")
         if sexo is None:
@@ -191,32 +196,91 @@ def resolver(alunos: list[Aluno], estrutura: dict[str, dict[str, int]]) -> tuple
     return saida, totais, nao_alocados, status, pulp.value(modelo.objective)
 
 
+def _escrever_aba(wb, nome: str, cabecalhos: list[str], linhas: list[list[object]]) -> None:
+    """Atualiza somente as células da tabela, mantendo a aba, a posição e o estilo."""
+    ws = wb[nome] if nome in wb.sheetnames else wb.create_sheet(nome)
+    # Limpa somente as colunas da tabela anterior; preserva notas e dados à direita.
+    for row in ws.iter_rows(min_row=1, max_row=max(ws.max_row, 1), min_col=1, max_col=len(cabecalhos)):
+        for celula in row:
+            celula.value = None
+    for coluna, valor in enumerate(cabecalhos, start=1):
+        ws.cell(row=1, column=coluna, value=valor)
+    for indice, valores in enumerate(linhas, start=2):
+        for coluna, valor in enumerate(valores, start=1):
+            ws.cell(row=indice, column=coluna, value=valor)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{ws.cell(row=max(len(linhas) + 1, 1), column=len(cabecalhos)).coordinate}"
+
+
+def salvar_resultado_excel(arquivo: Path, saida: list[dict], inconsistencias: list[dict]) -> None:
+    """Atualiza apenas Ensalamento e Inconsistências; preserva os dados de entrada."""
+    caminho = Path(arquivo)
+    workbook = load_workbook(caminho)
+    temporario: Path | None = None
+    try:
+        if ABAS["alunos"] not in workbook.sheetnames:
+            raise ValueError("A aba 'Alunos' não existe no arquivo selecionado.")
+        _escrever_aba(
+            workbook, ABAS["saida"], COLUNAS_SAIDA,
+            [[registro[coluna] for coluna in COLUNAS_SAIDA] for registro in saida],
+        )
+        _escrever_aba(
+            workbook, ABAS["erros"], ["Linha", "Nome", "Motivo"],
+            [[item["Linha"], item["Nome"], item["Motivo"]] for item in inconsistencias],
+        )
+
+        fd, nome_temporario = tempfile.mkstemp(
+            prefix=f"{caminho.stem}_", suffix=".tmp.xlsx", dir=str(caminho.parent)
+        )
+        os.close(fd)
+        temporario = Path(nome_temporario)
+        workbook.save(temporario)
+    except Exception:
+        if temporario and temporario.exists():
+            temporario.unlink()
+        raise
+    finally:
+        workbook.close()
+
+    try:
+        os.replace(temporario, caminho)
+    except PermissionError as erro:
+        if temporario and temporario.exists():
+            temporario.unlink()
+        raise PermissionError("Feche o arquivo no Excel e tente novamente; nenhuma alteração foi gravada.") from erro
+    except Exception:
+        if temporario and temporario.exists():
+            temporario.unlink()
+        raise
+
+
 def executar(arquivo: Path) -> str:
     with pd.ExcelFile(arquivo) as xls:
         estrutura = ler_estrutura(xls)
         alunos, inconsistencias = ler_alunos(xls)
-    saida, totais, nao_alocados, status, objetivo = resolver(alunos, estrutura)
+    saida, _, nao_alocados, status, _ = resolver(alunos, estrutura)
     for aluno in nao_alocados:
-        inconsistencias.append({"Linha": aluno.linha, "Nome": aluno.nome,
-                                "Motivo": f"Sem turma: não há vaga disponível no período {aluno.periodo.title()}."})
-    linhas = [
-        f"Status do solver: {status}",
-        f"Valor da função objetivo: {objetivo}",
-        f"Alunos alocados: {len(saida)} | Sem turma: {len(nao_alocados)}",
-        "",
-        "DISTRIBUIÇÃO (Nome | Sexo | Disponibilidade | Turma)",
-        *[f"{r['Nome']} | {r['Sexo']} | {r['Disponibilidade']} | {r['Turma']}" for r in saida],
-        "",
-        "TOTAIS POR TURMA",
-        *[f"{nome}: {quantidade}" for nome, quantidade in totais.items()],
-    ]
-    if nao_alocados:
-        linhas.extend(["", "ALUNOS SEM TURMA", *[f"Linha {a.linha} | {a.nome} | {a.periodo.title()}" for a in nao_alocados]])
-    if inconsistencias:
-        linhas.extend(["", "INCONSISTÊNCIAS / AVISOS"])
-        linhas.extend(f"Linha {r['Linha']} | {r['Nome']} | {r['Motivo']}" for r in inconsistencias)
-    linhas.extend(["", "Modo de depuração: o arquivo Excel não foi alterado."])
-    return "\n".join(linhas)
+        inconsistencias.append({
+            "Linha": aluno.linha,
+            "Nome": aluno.nome,
+            "Motivo": (
+                f"Aluno sem turma no resultado do modelo (período {aluno.periodo.title()}); "
+                "verifique a capacidade e os critérios da função objetivo."
+            ),
+        })
+
+    if status != "Optimal":
+        raise ValueError(
+            "O solver encontrou uma solução viável, mas não comprovou que é ótima. "
+            "O Excel não foi alterado; tente novamente ou reveja o tempo de resolução."
+        )
+
+    salvar_resultado_excel(arquivo, saida, inconsistencias)
+    return (
+        f"Ensalamento concluído e salvo no Excel.\n"
+        f"Alunos alocados: {len(saida)} | Sem turma: {len(nao_alocados)}\n"
+        f"Inconsistências/avisos registrados: {len(inconsistencias)}."
+    )
 
 
 def interface() -> None:
@@ -234,28 +298,26 @@ def interface() -> None:
         caminho = filedialog.askopenfilename(title="Selecione o cenário Excel", filetypes=[("Planilhas Excel", "*.xlsx")])
         if not caminho:
             return
-        status.set("Resolvendo. A distribuição será impressa no terminal ao concluir.")
+        status.set("Validando os dados e gerando o ensalamento no arquivo selecionado...")
         botao.config(state="disabled")
 
         def trabalho() -> None:
             try:
                 relatorio = executar(Path(caminho))
-                print(relatorio, flush=True)
-                janela.after(0, lambda: finalizado())
+                janela.after(0, lambda: finalizado(relatorio))
             except Exception as erro:
-                print(f"Erro: {erro}", file=sys.stderr, flush=True)
                 janela.after(0, lambda mensagem=str(erro): falhou(mensagem))
 
         threading.Thread(target=trabalho, daemon=True).start()
 
-    def finalizado() -> None:
+    def finalizado(mensagem: str) -> None:
         botao.config(state="normal")
-        status.set("Concluído. Veja a distribuição e os avisos no terminal.")
-        messagebox.showinfo("Concluído", "A distribuição e os avisos foram impressos no terminal.")
+        status.set("Concluído. Resultado e inconsistências salvos no Excel selecionado.")
+        messagebox.showinfo("Ensalamento concluído", mensagem)
 
     def falhou(mensagem: str) -> None:
         botao.config(state="normal")
-        status.set("Falha ao gerar distribuição. Veja o terminal.")
+        status.set("O ensalamento não foi gravado. Revise a mensagem e o arquivo selecionado.")
         messagebox.showerror("Falha no ensalamento", mensagem)
 
     botao.config(command=escolher)

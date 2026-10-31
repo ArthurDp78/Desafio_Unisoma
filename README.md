@@ -8,7 +8,7 @@ Aplicação em Python para distribuir os alunos matriculados nas turmas disponí
 2. Lê as abas **Alunos** e **Turmas**.
 3. Valida os registros e a capacidade disponível.
 4. Resolve um modelo matemático de programação inteira binária usando PuLP e o solver CBC.
-5. Imprime no terminal a distribuição, os totais por turma, alunos sem vaga e avisos de inconsistência. Nesta fase de depuração, o Excel não é alterado.
+5. Salva a distribuição e os avisos nas abas correspondentes do mesmo Excel.
 
 ## Regras representadas
 
@@ -54,9 +54,10 @@ Os parâmetros são lidos do Excel em cada execução; não ficam fixos no códi
 
 ## Arquivos de saída
 
-- **Terminal**: mostra status do solver e valor objetivo, lista de alunos alocados, totais por turma, alunos sem vaga e avisos. Registra dados corrigidos automaticamente, registros inválidos e nomes duplicados.
+- **Ensalamento**: colunas na ordem `Nome`, `Sexo`, `Disponibilidade`, `Turma`.
+- **Inconsistências**: colunas `Linha`, `Nome`, `Motivo`; registra valores normalizados, registros inválidos, nomes repetidos e alunos sem turma.
 
-O Excel é usado somente como entrada e não é modificado nesta fase de depuração.
+O resultado é gravado no mesmo arquivo selecionado, atualizando apenas `Ensalamento` e `Inconsistências` após o status `Optimal`. As normalizações são feitas em memória e aparecem na saída; os dados originais de `Alunos` e `Turmas` são preservados. O programa salva primeiro em um arquivo temporário e só substitui o arquivo selecionado depois de salvar o workbook completo. Feche o arquivo no Excel antes da execução.
 
 ## Instalação e execução no Windows
 
@@ -69,7 +70,7 @@ python -m pip install -r requirements.txt
 python ensalamento.py
 ```
 
-Também é possível abrir `executar.bat`. A janela do programa permite selecionar o `.xlsx` sem passar o caminho pela linha de comando. O cálculo roda em segundo plano para a janela continuar respondendo; o resultado aparece no terminal que iniciou o programa.
+Também é possível abrir `executar.bat`. A janela permite selecionar o `.xlsx`; o cálculo roda em segundo plano e informa quando as abas foram atualizadas. A distribuição não é despejada no terminal.
 
 Execução opcional pelo terminal com caminho explícito:
 
