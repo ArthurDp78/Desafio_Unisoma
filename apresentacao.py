@@ -69,22 +69,32 @@ def processar_planilha(origem: Path) -> ResultadoInterface:
         ensalamento.executar(copia)
         with pd.ExcelFile(copia) as excel:
             estrutura = ensalamento.ler_estrutura(excel)
-            alunos_validos, _ = ensalamento.ler_alunos(excel)
-            distribuicao = pd.read_excel(excel, sheet_name=ensalamento.ABAS["saida"],
+            resultado_ensalamento = pd.read_excel(excel, sheet_name=ensalamento.ABAS["saida"],
                                          usecols=ensalamento.COLUNAS_SAIDA).dropna(how="all").fillna("").to_dict("records")
             inconsistencias = pd.read_excel(excel, sheet_name=ensalamento.ABAS["erros"],
                                              usecols=["Linha", "Nome", "Motivo"]).dropna(how="all").fillna("").to_dict("records")
         planilha = copia.read_bytes()
     grupos = {nome: [] for _, nome, _ in criar_turmas(estrutura)}
-    for registro in distribuicao:
-        grupos[registro["Turma"]].append(registro)
+    distribuicao = []
+    nao_alocados = []
+    # A planilha completa é preservada para exportação. Os grupos e indicadores
+    # de distribuição da interface consideram apenas alunos em turmas reais.
+    for registro in resultado_ensalamento:
+        turma = registro["Turma"]
+        if turma == "SEM TURMA":
+            nao_alocados.append(registro)
+        elif turma in grupos:
+            distribuicao.append(registro)
+            grupos[turma].append(registro)
+        else:
+            raise ValueError(f"Turma desconhecida no resultado do ensalamento: {turma!r}.")
     for registros in grupos.values():
         registros.sort(key=lambda r: texto_busca(r["Nome"]))
     totais = {nome: len(registros) for nome, registros in grupos.items()}
     sexos = {nome: (sum(r["Sexo"] == "M" for r in registros), sum(r["Sexo"] == "F" for r in registros))
              for nome, registros in grupos.items()}
     return ResultadoInterface(origem, planilha, distribuicao, inconsistencias, grupos, totais, sexos,
-                              len(alunos_validos) - len(distribuicao))
+                              len(nao_alocados))
 
 
 def exportar_planilha(resultado: ResultadoInterface, destino: Path) -> Path:
