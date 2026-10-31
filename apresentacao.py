@@ -12,6 +12,7 @@ import unicodedata
 import pandas as pd
 
 import ensalamento
+from dados import criar_turmas
 
 
 def texto_busca(texto: str) -> str:
@@ -74,12 +75,7 @@ def processar_planilha(origem: Path) -> ResultadoInterface:
             inconsistencias = pd.read_excel(excel, sheet_name=ensalamento.ABAS["erros"],
                                              usecols=["Linha", "Nome", "Motivo"]).dropna(how="all").fillna("").to_dict("records")
         planilha = copia.read_bytes()
-    grupos = {}
-    indice = 0
-    for periodo in ("MANHÃ", "TARDE"):
-        for _ in range(estrutura[periodo]["turmas"]):
-            grupos[f"{periodo} - {chr(ord('A') + indice)}"] = []
-            indice += 1
+    grupos = {nome: [] for _, nome, _ in criar_turmas(estrutura)}
     for registro in distribuicao:
         grupos[registro["Turma"]].append(registro)
     for registros in grupos.values():

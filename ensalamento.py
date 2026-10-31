@@ -12,6 +12,8 @@ import pandas as pd
 import pulp
 from openpyxl import load_workbook
 
+from dados import criar_turmas
+
 
 ABAS = {"alunos": "Alunos", "turmas": "Turmas", "saida": "Ensalamento", "erros": "Inconsistências"}
 COLUNAS_SAIDA = ["Nome", "Sexo", "Disponibilidade", "Turma"]
@@ -130,13 +132,7 @@ def ler_alunos(xls: pd.ExcelFile) -> tuple[list[Aluno], list[dict]]:
 
 
 def resolver(alunos: list[Aluno], estrutura: dict[str, dict[str, int]]) -> tuple[list[dict], dict[str, int], list[Aluno], str, float | None]:
-    turmas: list[tuple[str, str, int]] = []
-    letra = 0
-    for periodo in ("MANHÃ", "TARDE"):
-        for _ in range(estrutura[periodo]["turmas"]):
-            letra_nome = chr(ord("A") + letra)
-            turmas.append((periodo, f"{periodo} - {letra_nome}", estrutura[periodo]["vagas"]))
-            letra += 1
+    turmas = criar_turmas(estrutura)
 
     modelo = pulp.LpProblem("Ensalamento_ABC_Aprendiz", pulp.LpMinimize)
     x = {(i, j): pulp.LpVariable(f"x_{i}_{j}", cat="Binary")

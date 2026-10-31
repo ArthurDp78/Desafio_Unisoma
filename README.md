@@ -19,7 +19,7 @@ Aplicação em Python para distribuir os alunos matriculados nas turmas disponí
 - Disponibilidade de manhã só permite turma de manhã; disponibilidade à tarde só permite turma da tarde.
 - Cada turma respeita o limite de vagas informado na aba **Turmas**.
 - Um aluno pode ficar sem turma quando faltarem vagas; ele aparece na aba **Ensalamento** com `SEM TURMA` na coluna `Turma` e também é reportado na aba **Inconsistências**.
-- A nomenclatura é contínua entre os períodos: as turmas da manhã recebem as primeiras letras e as da tarde continuam a sequência, no padrão `MANHÃ - A`, `MANHÃ - B`, `TARDE - C` etc.
+- A nomenclatura é contínua entre os períodos: as turmas da manhã recebem as primeiras letras e as da tarde continuam a sequência, no padrão `MANHÃ - A`, `MANHÃ - B`, `TARDE - C` etc. Após `Z`, a sequência continua com `AA`, `AB`, …, `AZ`, `BA`, …; após `ZZ`, segue com `AAA`. Por exemplo, com 26 turmas de manhã, a primeira turma da tarde se chama `TARDE - AA`.
 - As linhas de alunos com nomes repetidos são preservadas como registros distintos e incluídas no ensalamento; o nome duplicado é reportado como aviso, pois pode ser homônimo ou erro cadastral.
 
 ### Função objetivo
