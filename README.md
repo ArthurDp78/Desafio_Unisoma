@@ -115,12 +115,14 @@ O desafio exige Python **3.12.9**. No PowerShell, dentro desta pasta:
 
 ```powershell
 py -3.12 -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python ensalamento.py
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe ensalamento.py
 ```
 
-Também é possível abrir `executar.bat`. Ele prioriza o executável em `dist/ABC_Aprendiz.exe`; se ainda não tiver sido gerado, usa o ambiente local `.venv-ui` ou um Python com as dependências instaladas.
+Os comandos chamam diretamente o Python do ambiente virtual, sem depender da política de execução do PowerShell para ativar scripts. Se também for gerar o executável, instale `requirements-dev.txt` na etapa de empacotamento abaixo.
+
+Também é possível abrir `executar.bat`. Ele prioriza `dist/ABC_Aprendiz.exe`; se ainda não tiver sido gerado, tenta `.venv-ui`, `.venv` e depois um Python global com as dependências instaladas.
 
 Na janela, use **Importar XLSX**, **Gerar distribuição** e **Exportar XLSX**. A distribuição não é despejada no terminal.
 
@@ -135,20 +137,25 @@ python ensalamento.py "C:\caminho\para\instancia.xlsx"
 Para preparar o empacotamento com Python 3.12.9:
 
 ```powershell
-python -m pip install -r requirements-dev.txt
-python -m playwright install chromium --only-shell
-python -m PyInstaller --noconfirm ABC_Aprendiz.spec
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.venv\Scripts\python.exe -m playwright install chromium --only-shell
+.venv\Scripts\python.exe -m PyInstaller --noconfirm ABC_Aprendiz.spec
 ```
 
-Ou execute `gerar_executavel.bat` após instalar as dependências de desenvolvimento. O script prepara o Chromium de build (reutiliza a instalação quando já disponível) e executa o PyInstaller, priorizando `.venv-ui`, depois `.venv` e, por fim, `py -3.12`. O resultado é:
+Ou execute `gerar_executavel.bat` após instalar `requirements-dev.txt` no ambiente `.venv`. O script prepara o Chromium de build (reutiliza a instalação quando já disponível) e executa o PyInstaller, priorizando `.venv-ui`, depois `.venv` e, por fim, `py -3.12`. O resultado é:
 
 ```text
 dist/
-├── ABC_Aprendiz.exe
-└── Manual_do_Usuario_ABC_Aprendiz.pdf
+└── ABC_Aprendiz.exe
 ```
 
-Distribua **os dois arquivos juntos, na mesma pasta**: o computador de destino não precisa de Python nem de ferramentas para gerar o manual. O executável único inclui suas bibliotecas e prepara os componentes em uma pasta temporária durante a abertura; não há pasta `_internal` para distribuir. O PDF permanece externo para ser encontrado facilmente e aberto pelo visualizador padrão.
+Distribua somente `ABC_Aprendiz.exe`: o manual em PDF está embutido no executável, junto com as bibliotecas da aplicação. Ao clicar em **Manual do usuário**, o programa extrai uma cópia para a mesma pasta do `.exe` apenas se o PDF ainda não existir. Se já houver uma cópia, ela é aberta sem ser substituída. A pasta precisa permitir gravação na primeira abertura do manual. Não há pasta `_internal`, Python ou ferramentas de build para distribuir.
+
+### ZIP do código-fonte para avaliação
+
+Para permitir que outra pessoa instale as dependências e gere o executável, envie o código-fonte, não o ambiente virtual da sua máquina. Inclua `README.md`, `requirements*.txt`, os arquivos `.py` e `.spec`, os arquivos `.bat`, `manual_usuario.html`, `ui/`, `assets/`, `Dados/` e `tests/`. Inclua também `Contexto/` se os PDFs do desafio estiverem disponíveis.
+
+Não inclua `.git/`, `.venv/`, `.venv-ui/`, `.python-runtime/`, `build/`, `dist/`, `outputs/`, `__pycache__/` nem o PDF gerado na raiz. O avaliador recria o ambiente com os comandos acima; o PDF e o executável são regenerados durante o build. Se a organização pedir o executável pronto além do código-fonte, envie `dist/ABC_Aprendiz.exe` separadamente.
 
 O `.spec` inclui o solver CBC do PuLP e exclui os módulos de navegador e QML, que a interface não utiliza. A pasta `dist/` é um artefato local e não é versionada. O executável é uma build de desenvolvimento sem assinatura digital.
 
@@ -158,7 +165,7 @@ No Windows, o pacote também exclui cópias de ICU encontradas no `PATH` de outr
 
 `manual_usuario.html` é o fonte editável. No início de cada build, antes de `Analysis`, o `.spec` executa `gerar_manual.py` com o mesmo Python do PyInstaller. O gerador usa [Playwright e a impressão em PDF do Chromium](https://playwright.dev/python/docs/api/class-page#page-pdf), aplica o CSS de impressão/A4 do HTML, preserva fundos e espera fontes e imagens carregarem. A conversão é local; apenas a instalação inicial das ferramentas exige download. Se a conversão falhar, o build para, impedindo uma entrega com manual ausente ou desatualizado.
 
-O PDF gerado fica na raiz do projeto. Ao terminar `EXE`, o `.spec` copia esse PDF para `dist/`, ao lado do executável, respeitando também `--distpath`. Ele não entra em `datas`, pois isso o incorporaria ao executável e o extrairia na pasta temporária em vez de deixá-lo ao lado do `.exe`. O HTML, o gerador, o Playwright e o Chromium não são incluídos na aplicação. O PDF da raiz, `build/` e `dist/` são artefatos locais ignorados pelo Git.
+O PDF gerado fica na raiz do projeto durante o build e entra em `datas` no `.spec`, portanto é embutido no executável. O HTML, o gerador, o Playwright e o Chromium são ferramentas de build e não entram na aplicação. Em execução empacotada, `caminho_recurso()` localiza o PDF dentro da extração temporária do PyInstaller e `garantir_manual()` o copia para junto do `.exe` somente quando não há uma cópia persistente. A gravação usa criação exclusiva para nunca sobrescrever um arquivo existente; em caso de falha, a cópia incompleta é removida. O PDF da raiz, `build/` e `dist/` são artefatos locais ignorados pelo Git.
 
 Para preparar somente o manual em desenvolvimento, depois de instalar as ferramentas acima:
 
@@ -167,17 +174,17 @@ python gerar_manual.py
 python ensalamento.py
 ```
 
-Faça essa preparação ao atualizar o HTML. O programa nunca gera o manual na inicialização ou no clique. Opcionalmente, o gerador aceita `--html caminho.html` e `--destino caminho.pdf`.
+Faça essa preparação ao atualizar o HTML. O programa não converte o HTML nem gera o conteúdo do PDF durante a inicialização ou o clique; no executável, o botão apenas copia o PDF já embutido quando ainda não há uma cópia na pasta do programa. Opcionalmente, o gerador aceita `--html caminho.html` e `--destino caminho.pdf`.
 
-`ui/recursos.py:caminho_manual()` usa a raiz do projeto em desenvolvimento e `Path(sys.executable).resolve().parent` quando `sys.frozen` está ativo. A busca independe da pasta de trabalho e não usa `_MEIPASS` para o manual. No Windows, o botão chama `os.startfile` para abrir o próprio PDF no aplicativo associado; em outros sistemas, usa `QDesktopServices.openUrl`. Nenhuma cópia nem seletor de destino é criado.
+`ui/recursos.py:caminho_manual()` usa a raiz do projeto em desenvolvimento e `Path(sys.executable).resolve().parent` quando `sys.frozen` está ativo. `garantir_manual()` primeiro reutiliza o PDF persistente já existente; se estiver ausente, copia o recurso embutido com criação exclusiva, sem sobrescrever uma cópia criada por outra chamada. No Windows, o botão chama `os.startfile` para abrir o PDF no aplicativo associado; em outros sistemas, usa `QDesktopServices.openUrl`. Se a pasta do programa não permitir gravação, a interface informa que não conseguiu preparar o manual.
 
 Teste em desenvolvimento e depois no executável Windows:
 
-1. Prepare o PDF, abra a interface e clique em **Manual do usuário**. Confirme a abertura do PDF no visualizador padrão. Abra também o programa a partir de outra pasta de trabalho.
+1. Em desenvolvimento, gere o PDF, abra a interface e clique em **Manual do usuário**. Confirme a abertura no visualizador padrão. Abra também o programa a partir de outra pasta de trabalho.
 2. Redimensione a janela para 680, 899, 900 e 1280 px de largura. Confirme o cabeçalho, o modo apenas ícone abaixo de 900 px, a tooltip e a abertura pelo mesmo botão.
-3. Renomeie temporariamente o PDF e clique. Deve aparecer **Manual não encontrado** com “O Manual do Usuário não foi encontrado na pasta do sistema.” Restaure o nome em seguida.
-4. Em um ambiente Windows de teste sem associação funcional para PDF, clique com o arquivo presente. Deve aparecer **Não foi possível abrir o manual** com “Verifique se existe um programa instalado no computador capaz de abrir arquivos PDF.” Os testes automatizados também simulam essa falha sem alterar associações do computador.
-5. Execute `gerar_executavel.bat`, confira a estrutura acima e copie o `.exe` e o PDF juntos para outra localização ou um Windows sem Python. Abra o `.exe` e repita os passos anteriores. Confirme que cliques e reinicializações não alteram a data de modificação do manual.
+3. Em uma cópia de teste do pacote, apague o PDF ao lado do `.exe` e clique no manual. Confirme que o PDF embutido é criado nessa pasta e aberto. Clique novamente e confirme que o arquivo existente não foi alterado.
+4. Teste em uma cópia da aplicação cuja pasta não permita gravação. A interface deve informar que não conseguiu preparar o manual. Em um ambiente Windows sem associação funcional para PDF, o programa deve informar que não conseguiu abri-lo.
+5. Execute `gerar_executavel.bat`, confirme que `dist/` contém somente `ABC_Aprendiz.exe` e copie esse único arquivo para outra localização ou um Windows sem Python. Teste a criação do PDF no primeiro clique.
 
 O executável Windows deve ser gerado e validado no Windows; o teste em Linux não substitui essa verificação.
 

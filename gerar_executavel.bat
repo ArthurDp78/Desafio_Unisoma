@@ -23,5 +23,4 @@ if errorlevel 1 (
     exit /b 1
 )
 echo Executavel unico gerado em dist\ABC_Aprendiz.exe
-echo Manual gerado em dist\Manual_do_Usuario_ABC_Aprendiz.pdf
-echo Distribua o executavel e o manual juntos, na mesma pasta.
+echo O manual esta embutido e sera copiado ao lado do executavel apenas se estiver ausente.

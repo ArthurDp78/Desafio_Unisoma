@@ -10,6 +10,11 @@ if exist "%~dp0.venv-ui\Scripts\python.exe" (
     if errorlevel 1 pause
     exit /b
 )
+if exist "%~dp0.venv\Scripts\python.exe" (
+    "%~dp0.venv\Scripts\python.exe" "%~dp0ensalamento.py"
+    if errorlevel 1 pause
+    exit /b
+)
 py -3.12 -c "import pandas, pulp, openpyxl; import PySide6.QtWidgets" >nul 2>&1
 if not errorlevel 1 (
     py -3.12 "%~dp0ensalamento.py"

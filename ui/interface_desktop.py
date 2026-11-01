@@ -28,7 +28,7 @@ from apresentacao import (
     texto_busca, texto_diferenca_turmas, texto_variacao_genero,
 )
 
-from .recursos import caminho_manual, caminho_recurso, diretorio_aplicacao
+from .recursos import garantir_manual, caminho_recurso, diretorio_aplicacao
 from relatorio_pdf import IdentificacaoExecucao, exportar_relatorio_pdf
 from .tema import (
     AZUL, TURQUESA, TURQUESA_ESCURO, TEXTO, TEXTO_SECUNDARIO,
@@ -708,13 +708,21 @@ class JanelaPrincipal(QMainWindow):
 
     def abrir_manual(self):
         try:
-            manual = caminho_manual()
-            if not manual.is_file():
-                QMessageBox.warning(
-                    self, "Manual não encontrado",
-                    "O Manual do Usuário não foi encontrado na pasta do sistema.",
-                )
-                return
+            manual = garantir_manual()
+        except FileNotFoundError:
+            QMessageBox.warning(
+                self, "Manual indisponível",
+                "O manual não está disponível neste executável. Gere novamente o pacote da aplicação.",
+            )
+            return
+        except OSError:
+            QMessageBox.warning(
+                self, "Não foi possível preparar o manual",
+                "Não foi possível salvar o manual na pasta do programa. Verifique se essa pasta permite gravação.",
+            )
+            return
+
+        try:
             if sys.platform == "win32":
                 os.startfile(str(manual))
             elif not QDesktopServices.openUrl(QUrl.fromLocalFile(str(manual))):

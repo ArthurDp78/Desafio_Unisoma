@@ -1,7 +1,6 @@
 # Executável único: inclui o aplicativo, o Qt, os recursos e o CBC do PuLP no .exe.
 from PyInstaller.utils.hooks import collect_data_files
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
@@ -16,7 +15,7 @@ a = Analysis(
     pathex=[SPECPATH],
     binaries=[],
     datas=collect_data_files('pulp', includes=['solverdir/cbc/win/i64/*'])
-          + [(str(Path(SPECPATH) / 'assets'), 'assets')],
+          + [(str(Path(SPECPATH) / 'assets'), 'assets'), (str(manual), '.')],
     hiddenimports=['openpyxl', 'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets',
                    'PySide6.QtSvg', 'PySide6.QtSvgWidgets'],
     hookspath=[], hooksconfig={}, runtime_hooks=[],
@@ -34,5 +33,5 @@ a.binaries = [entrada for entrada in a.binaries
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, name='ABC_Aprendiz',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False)
-# Manual externo: fica ao lado do executável, fora dos recursos extraídos em _MEIPASS.
-shutil.copy2(manual, Path(DISTPATH) / manual.name)
+# O PDF fica embutido no executável e é copiado para a pasta do programa
+# somente quando o usuário abre o manual e ainda não existe uma cópia.
