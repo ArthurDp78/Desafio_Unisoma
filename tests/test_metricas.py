@@ -90,9 +90,9 @@ class MetricasTest(unittest.TestCase):
         self.assertEqual(empate["turmas"], ["MANHÃ - A", "MANHÃ - B"])
 
     def test_textos_de_tamanho(self):
-        self.assertEqual(texto_diferenca_turmas(0), "turmas com o mesmo tamanho")
-        self.assertEqual(texto_diferenca_turmas(1), "até 1 aluno")
-        self.assertEqual(texto_diferenca_turmas(2), "até 2 alunos")
+        self.assertEqual(texto_diferenca_turmas(0), "0 aluno")
+        self.assertEqual(texto_diferenca_turmas(1), "1 aluno")
+        self.assertEqual(texto_diferenca_turmas(2), "2 alunos")
 
     def test_nao_alocados_preservados(self):
         dados = self.metricas["nao_alocados"]

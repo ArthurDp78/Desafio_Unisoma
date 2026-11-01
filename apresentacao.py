@@ -21,9 +21,7 @@ def formatar_percentual(valor: float) -> str:
 
 
 def texto_diferenca_turmas(amplitude: int) -> str:
-    if amplitude == 0:
-        return "turmas com o mesmo tamanho"
-    return f"até {amplitude} {'aluno' if amplitude == 1 else 'alunos'}"
+    return f"{amplitude} {'alunos' if amplitude > 1 else 'aluno'}"
 
 
 def texto_variacao_genero(variacao: dict) -> str:

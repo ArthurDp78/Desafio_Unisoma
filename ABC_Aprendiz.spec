@@ -6,8 +6,10 @@ a = Analysis(
     ['ensalamento.py'],
     pathex=[SPECPATH],
     binaries=[],
-    datas=collect_data_files('pulp', includes=['solverdir/cbc/win/i64/*']),
-    hiddenimports=['openpyxl', 'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets'],
+    datas=collect_data_files('pulp', includes=['solverdir/cbc/win/i64/*'])
+          + [(str(Path(SPECPATH) / 'assets'), 'assets')],
+    hiddenimports=['openpyxl', 'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets',
+                   'PySide6.QtSvg', 'PySide6.QtSvgWidgets'],
     hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=['tkinter', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets',
               'PySide6.QtQml', 'PySide6.QtQuick', 'matplotlib', 'IPython', 'pytest'],

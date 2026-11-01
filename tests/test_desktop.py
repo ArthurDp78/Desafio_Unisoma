@@ -22,7 +22,10 @@ from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 from apresentacao import ResultadoInterface, exportar_planilha, processar_planilha
 import ensalamento
 from dados import Aluno
-from interface_desktop import JanelaPrincipal
+from interface_desktop import (
+    Grafico, JanelaPrincipal, LARGURA_CARDS_TRES_COLUNAS,
+    LARGURA_DASHBOARD_DESKTOP,
+)
 from metricas import calcular_metricas
 
 
@@ -260,8 +263,9 @@ class InterfaceTest(unittest.TestCase):
         self.janela.deleteLater()
         self.app.processEvents()
 
-    def test_dashboard_exibe_dois_graficos_sem_carrossel(self):
+    def test_dashboard_desktop_exibe_dois_graficos_sem_paginacao(self):
         w = self.janela
+        w.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
         w.mostrar_resultado(amostra())
         graficos = list(w.graficos)
         for _ in range(20):
@@ -270,8 +274,13 @@ class InterfaceTest(unittest.TestCase):
         self.assertEqual(w.graficos, graficos)
         self.assertTrue(all(g.isVisible() for g in w.graficos))
         self.assertEqual(w.findChildren(QStackedWidget), [w.secoes])
-        for atributo in ("paginas", "mudar_dashboard", "pagina_dashboard", "dashboard_anterior", "dashboard_proximo"):
-            self.assertFalse(hasattr(w, atributo))
+        self.assertEqual(w.modo_dashboard, "desktop")
+        self.assertFalse(w.controles_dashboard.isVisible())
+        self.assertFalse(w.dashboard_anterior.isVisible())
+        self.assertFalse(w.dashboard_proximo.isVisible())
+        self.assertFalse(w.pagina_dashboard.isVisible())
+        self.assertEqual(w.grade_indicadores.colunas, 6)
+        self.assertEqual(w.grade_resumos.colunas, 2)
         self.assertEqual(w.graficos[1].dados["MANHÃ - B"], (0, 0))
         self.assertEqual(w.graficos[0].capacidades["MANHÃ - A"], 2)
         self.assertEqual(len(w.indicadores), 6)
@@ -279,15 +288,17 @@ class InterfaceTest(unittest.TestCase):
         self.assertEqual(w.indicadores[3].text(), "50,0%")
         self.assertEqual(w.indicadores[4].text(), "50,0%")
         self.assertEqual(w.detalhes_indicadores[4].text(), "3 vagas livres")
-        self.assertEqual(w.diferencas_turmas["MANHÃ"].text(), "Manhã: até 2 alunos")
-        self.assertEqual(w.diferencas_turmas["TARDE"].text(), "Tarde: turmas com o mesmo tamanho")
+        self.assertEqual(w.diferencas_turmas["MANHÃ"].text(), "2 alunos")
+        self.assertEqual(w.diferencas_turmas["TARDE"].text(), "0 aluno")
         self.assertEqual(w.variacao_genero.text(), "1 homem a mais")
-        self.assertEqual(w.resumo_turnos["MANHÃ"]["taxa_ociosidade"].text(), "50,0% · 2 vagas livres")
+        self.assertEqual(w.turmas_variacao_genero.text(), "TARDE - C")
+        self.assertEqual(w.resumo_turnos["MANHÃ"]["alunos_alocados"].text(), "2 / 2")
+        self.assertEqual(w.resumo_turnos["MANHÃ"]["vagas_ociosas"].text(), "2")
 
     def test_dashboard_reorganiza_graficos_e_cards_com_rolagem(self):
         w = self.janela
         w.mostrar_resultado(amostra())
-        w.resize(1180, 880)
+        w.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
         self.app.processEvents()
         self.assertEqual(w.grade_graficos.colunas, 2)
         self.assertEqual(w.grade_indicadores.colunas, 6)
@@ -295,16 +306,178 @@ class InterfaceTest(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(w.grade_graficos.colunas, 1)
         self.assertEqual(w.grade_indicadores.colunas, 3)
+        self.assertEqual(w.grade_resumos.colunas, 1)
+        self.assertTrue(w.controles_dashboard.isVisible())
         self.assertGreater(w.dashboard.verticalScrollBar().maximum(), 0)
         self.assertEqual(w.dashboard.horizontalScrollBar().maximum(), 0)
-        self.assertTrue(all(g.isVisible() for g in w.graficos))
+        self.assertEqual([g.isVisible() for g in w.graficos], [True, False])
         self.assertTrue(all(p.height() == 330 for p in w.grade_graficos.widgets))
         graficos = list(w.graficos)
-        w.resize(1180, 880)
+        w.resize(LARGURA_CARDS_TRES_COLUNAS - 80, 600)
+        self.app.processEvents()
+        self.assertEqual(w.grade_indicadores.colunas, 2)
+        self.assertEqual(w.dashboard.horizontalScrollBar().maximum(), 0)
+        w.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
         self.app.processEvents()
         self.assertEqual(w.grade_graficos.colunas, 2)
         self.assertEqual(w.grade_indicadores.colunas, 6)
         self.assertEqual(w.graficos, graficos)
+
+    def test_carrossel_compacto_alterna_os_mesmos_graficos(self):
+        w = self.janela
+        w.resize(LARGURA_DASHBOARD_DESKTOP - 100, 880)
+        w.mostrar_resultado(amostra())
+        self.app.processEvents()
+        self.assertEqual(w.modo_dashboard, "compacto")
+        self.assertEqual([g.isVisible() for g in w.graficos], [True, False])
+        self.assertTrue(w.controles_dashboard.isVisible())
+        self.assertEqual(w.pagina_dashboard.text(), "1 / 2")
+        for _ in range(3):
+            w.dashboard_proximo.click()
+            self.assertEqual([g.isVisible() for g in w.graficos], [False, True])
+            self.assertEqual(w.pagina_dashboard.text(), "2 / 2")
+            w.dashboard_proximo.click()
+            self.assertEqual([g.isVisible() for g in w.graficos], [True, False])
+        w.dashboard_anterior.click()
+        self.assertEqual([g.isVisible() for g in w.graficos], [False, True])
+        self.assertEqual(w.pagina_dashboard.text(), "2 / 2")
+        self.assertTrue(all(p.isVisible() for p in w.grade_resumos.widgets))
+        self.assertEqual(w.grade_resumos.colunas, 1)
+
+    def test_resize_preserva_resultado_selecao_rolagem_e_conexoes(self):
+        w = self.janela
+        w.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
+        resultado = amostra()
+        w.mostrar_resultado(resultado)
+        w.turma.setCurrentText("TARDE - C")
+        # Muitas linhas tornam a preservação da rolagem verificável.
+        dados = {f"MANHÃ - {i}": 2 for i in range(32)}
+        dados["TARDE - C"] = 1
+        w.graficos[0].definir(dados)
+        w.graficos[1].definir({nome: (1, 1) for nome in dados})
+        self.app.processEvents()
+        for area, valor in zip(w.areas_graficos, (80, 100)):
+            area.verticalScrollBar().setValue(valor)
+        graficos = list(w.graficos)
+        paineis = list(w.grade_graficos.widgets)
+        resumos = list(w.grade_resumos.widgets)
+        indicadores = [r.text() for r in w.indicadores]
+        dados_antes = [dict(g.dados) for g in graficos]
+        conexoes = [g.receivers("2turma_clicada(QString)") for g in graficos]
+        quantidade_widgets = len(w.findChildren(QWidget))
+        with patch("ensalamento.resolver", side_effect=AssertionError("Resize não resolve a instância")):
+            for _ in range(3):
+                for largura in (LARGURA_DASHBOARD_DESKTOP - 100, LARGURA_DASHBOARD_DESKTOP + 80):
+                    w.resize(largura, 880)
+                    self.app.processEvents()
+                    self.assertIs(w.resultado, resultado)
+                    self.assertEqual(w.graficos, graficos)
+                    self.assertEqual(w.grade_graficos.widgets, paineis)
+                    self.assertEqual(w.grade_resumos.widgets, resumos)
+                    self.assertEqual([g.dados for g in graficos], dados_antes)
+                    self.assertEqual([r.text() for r in w.indicadores], indicadores)
+                    self.assertEqual(w.turma.currentText(), "TARDE - C")
+                    self.assertTrue(all(g.selecionada == "TARDE - C" for g in graficos))
+                    self.assertEqual([a.verticalScrollBar().value() for a in w.areas_graficos], [80, 100])
+        self.assertEqual(len(w.findChildren(QWidget)), quantidade_widgets)
+        self.assertEqual(w.findChildren(Grafico), graficos)
+        self.assertEqual([g.receivers("2turma_clicada(QString)") for g in graficos], conexoes)
+        w.resize(LARGURA_DASHBOARD_DESKTOP - 100, 880)
+        self.app.processEvents()
+        with patch.object(w, "mudar_dashboard", wraps=w.mudar_dashboard) as mudar:
+            w.dashboard_proximo.click()
+        mudar.assert_called_once_with(1)
+        self.assertEqual(w.indice_dashboard, 1)
+        w.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
+        self.app.processEvents()
+        w.resize(LARGURA_DASHBOARD_DESKTOP - 100, 880)
+        self.app.processEvents()
+        self.assertEqual(w.pagina_dashboard.text(), "2 / 2")
+        self.assertEqual([g.isVisible() for g in graficos], [False, True])
+        graficos[1].turma_clicada.emit("MANHÃ - A")
+        self.assertEqual(w.turma.currentText(), "MANHÃ - A")
+        self.assertEqual(w.secoes.currentIndex(), 1)
+
+    def test_resize_reorganiza_somente_ao_cruzar_breakpoint(self):
+        w = self.janela
+        w.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
+        self.app.processEvents()
+        with patch.object(w, "reorganizar_dashboard", wraps=w.reorganizar_dashboard) as reorganizar:
+            for largura in (LARGURA_DASHBOARD_DESKTOP + 100, LARGURA_DASHBOARD_DESKTOP + 120):
+                w.resize(largura, 880)
+                self.app.processEvents()
+            reorganizar.assert_not_called()
+            w.resize(LARGURA_DASHBOARD_DESKTOP - 10, 880)
+            self.app.processEvents()
+            reorganizar.assert_called_once()
+            for largura in (LARGURA_DASHBOARD_DESKTOP - 20, LARGURA_DASHBOARD_DESKTOP - 30):
+                w.resize(largura, 880)
+                self.app.processEvents()
+            self.assertEqual(reorganizar.call_count, 1)
+            w.resize(LARGURA_DASHBOARD_DESKTOP + 10, 880)
+            self.app.processEvents()
+            self.assertEqual(reorganizar.call_count, 2)
+
+    def test_full_hd_exibe_graficos_e_resumos_lado_a_lado(self):
+        w = self.janela
+        resultado = amostra()
+        w.mostrar_resultado(resultado)
+        w.resize(LARGURA_DASHBOARD_DESKTOP + 80, 1080)
+        self.app.processEvents()
+        self.assertTrue(all(g.isVisible() for g in w.graficos))
+        w.resize(1920, 1080)
+        self.app.processEvents()
+        self.assertEqual(w.modo_dashboard, "desktop")
+        self.assertFalse(w.controles_dashboard.isVisible())
+        self.assertTrue(all(g.isVisible() for g in w.graficos))
+        self.assertEqual(w.grade_indicadores.colunas, 6)
+        self.assertEqual(w.grade_resumos.colunas, 2)
+        self.assertEqual(w.grade_qualidade.colunas, 2)
+        self.assertIs(w.resultado, resultado)
+
+    def test_resumo_por_turno_tem_tabela_centralizada_de_cinco_linhas(self):
+        w = self.janela
+        w.mostrar_resultado(amostra())
+        w.resize(1920, 1080)
+        self.app.processEvents()
+        self.assertEqual([r.text() for r in w.rotulos_resumo_turnos.values()],
+                         ["Alocados", "Sem turma", "Capacidade", "Ocupação", "Vagas livres"])
+        self.assertEqual([r.text() for r in w.cabecalhos_turnos.values()], ["MANHÃ", "TARDE"])
+        for cabecalho in w.cabecalhos_turnos.values():
+            self.assertEqual(cabecalho.alignment(), Qt.AlignmentFlag.AlignCenter)
+        for turno, valores in w.resumo_turnos.items():
+            self.assertEqual(len(valores), 5)
+            for rotulo in valores.values():
+                self.assertEqual(rotulo.alignment(), Qt.AlignmentFlag.AlignCenter)
+            self.assertNotIn("alunos_disponiveis", valores)
+            self.assertNotIn("taxa_ociosidade", valores)
+        self.assertEqual(w.resumo_turnos["TARDE"]["alunos_alocados"].text(), "1 / 1")
+        self.assertLessEqual(w.tabela_resumo_turnos.width(), 520)
+        self.assertLess(w.tabela_resumo_turnos.width(), w.grade_resumos.widgets[1].width())
+        w.resize(680, 600)
+        self.app.processEvents()
+        self.assertEqual(w.grade_resumos.colunas, 1)
+        self.assertEqual(w.grade_qualidade.colunas, 1)
+        self.assertEqual(w.dashboard.horizontalScrollBar().maximum(), 0)
+
+    def test_qualidade_mostra_empates_e_oculta_turmas_quando_equilibrado(self):
+        w = self.janela
+        resultado = amostra()
+        # Somente dados de apresentação; a fórmula continua em metricas.py.
+        resultado.metricas["destaques"]["variacao_genero"] = {
+            "quantidade": 3, "predominancias": ["mulheres", "homens"],
+            "turmas": ["MANHÃ - A", "TARDE - C"],
+        }
+        w.mostrar_resultado(resultado)
+        self.assertEqual(w.variacao_genero.text(), "3 mulheres a mais · 3 homens a mais")
+        self.assertEqual(w.turmas_variacao_genero.text(), "MANHÃ - A, TARDE - C")
+        resultado.metricas["destaques"]["variacao_genero"] = {
+            "quantidade": 0, "predominancias": ["equilibrado"], "turmas": ["MANHÃ - A"],
+        }
+        w.mostrar_resultado(resultado)
+        self.assertEqual(w.variacao_genero.text(), "Equilibrado")
+        self.assertTrue(w.turmas_variacao_genero.isHidden())
+        self.assertEqual(w.turmas_variacao_genero.text(), "")
 
     def test_dashboard_usa_metricas_como_fonte(self):
         resultado = amostra()

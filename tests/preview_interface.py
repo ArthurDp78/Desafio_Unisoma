@@ -14,7 +14,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from apresentacao import processar_planilha
-from interface_desktop import JanelaPrincipal
+from interface_desktop import JanelaPrincipal, LARGURA_DASHBOARD_DESKTOP
 
 
 def main():
@@ -30,7 +30,7 @@ def main():
     app.setPalette(app.style().standardPalette())
     app.setFont(QFont("Segoe UI", 10))
     janela = JanelaPrincipal()
-    janela.resize(1180, 820)
+    janela.resize(LARGURA_DASHBOARD_DESKTOP + 80, 820)
     origem = RAIZ / "Dados" / "instancia_1.xlsx"
     janela.definir_arquivo(origem)
     janela.mostrar_resultado(processar_planilha(origem))
@@ -40,9 +40,15 @@ def main():
         QTest.qWait(160)
         assert janela.grab().save(str(pasta / f"{nome}.png"))
     janela.mudar_secao(0)
+    janela.resize(1920, 1080)
+    QTest.qWait(160)
+    assert janela.grab().save(str(pasta / "dashboard_full_hd.png"))
     janela.resize(880, 600)
     QTest.qWait(160)
     assert janela.grab().save(str(pasta / "dashboard_compacto.png"))
+    janela.dashboard_proximo.click()
+    QTest.qWait(160)
+    assert janela.grab().save(str(pasta / "dashboard_compacto_sexos.png"))
     tempos = []
     for i in range(60):
         inicio = perf_counter()
