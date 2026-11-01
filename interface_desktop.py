@@ -26,6 +26,7 @@ from tema import (
     FUNDO, BRANCO, BORDA, FUNDO_AZUL, ESTILO, ESPACO, MARGEM_PAINEL,
     ICONE, ICONE_CARD, FONTE_GRAFICO, FONTE_EIXO, ALTURA_EIXO,
     ALTURA_GRAFICO_MINIMA, ALTURA_GRAFICO_MAXIMA,
+    AJUSTE_MAXIMO_GRAFICOS,
     FUNDO_ALERTA, CONTADOR_MINIMO,
     ESPACO_SECOES, PADDING_ABA_VERTICAL, PADDING_ABA_HORIZONTAL, fonte_interface,
     LIMITE_TURMAS_VARIACAO,
@@ -49,9 +50,10 @@ def fonte_grafico(tamanho=FONTE_GRAFICO, peso=QFont.Weight.Normal):
 class ContadorOcorrencias(QLabel):
     """Badge circular que comporta o total sem cortar números com vários dígitos."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, tipo="total"):
         super().__init__(parent)
         self.setObjectName("badgeOcorrencias")
+        self.setProperty("tipo", tipo)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.definir(0)
 
@@ -68,7 +70,8 @@ class ContadorOcorrencias(QLabel):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(FUNDO_AZUL if self.property("vazio") else FUNDO_ALERTA))
+        azul = self.property("tipo") == "avisos" or (self.property("tipo") == "total" and self.property("vazio"))
+        painter.setBrush(QColor(FUNDO_AZUL if azul else FUNDO_ALERTA))
         painter.drawEllipse(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5))
         painter.end()
         super().paintEvent(evento)
@@ -212,6 +215,7 @@ class RelatorioOcorrencias(QPlainTextEdit):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.document().setDocumentMargin(0)
+        self._blocos_divisoria = []
         self._ajustando = False
         self._ajuste_altura = QTimer(self)
         self._ajuste_altura.setSingleShot(True)
@@ -231,15 +235,38 @@ class RelatorioOcorrencias(QPlainTextEdit):
             layout = documento.documentLayout()
             bloco = documento.begin()
             altura = 0
+            encontrou_registro = False
+            self._blocos_divisoria = []
             while bloco.isValid():
+                # Identifica os cabeçalhos do relatório existente, sem mudar seu texto.
+                if " · Aba Alunos · Linha(s) " in bloco.text():
+                    if encontrou_registro:
+                        espaco = bloco.previous()
+                        while espaco.isValid() and espaco.text().strip():
+                            espaco = espaco.previous()
+                        if espaco.isValid():
+                            self._blocos_divisoria.append(espaco)
+                    encontrou_registro = True
                 # blockBoundingRect força o layout também das linhas fora do viewport.
                 altura += layout.blockBoundingRect(bloco).height()
                 bloco = bloco.next()
             altura = ceil(altura + 2 * documento.documentMargin() + 2 * self.frameWidth()) + 2
             if altura != self.minimumHeight() or altura != self.maximumHeight():
                 self.setFixedHeight(altura)
+            self.viewport().update()
         finally:
             self._ajustando = False
+
+    def paintEvent(self, evento):
+        super().paintEvent(evento)
+        painter = QPainter(self.viewport())
+        painter.setPen(QPen(QColor(BORDA), 1))
+        for bloco in self._blocos_divisoria:
+            if bloco.isValid():
+                area = self.blockBoundingGeometry(bloco).translated(self.contentOffset())
+                y = round(area.center().y())
+                if evento.rect().top() <= y <= evento.rect().bottom():
+                    painter.drawLine(0, y, self.viewport().width() - 1, y)
 
     def resizeEvent(self, evento):
         super().resizeEvent(evento)
@@ -287,13 +314,24 @@ class FiltroAlunos(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.consulta = ""
+        self.sexo = ""
+        self.disponibilidade = ""
 
     def pesquisar(self, texto):
         self.consulta = texto_busca(texto.strip())
         self.invalidate()
 
+    def filtrar(self, sexo, disponibilidade):
+        self.sexo = sexo
+        self.disponibilidade = texto_busca(disponibilidade)
+        self.invalidate()
+
     def filterAcceptsRow(self, linha, parent):
-        return self.consulta in texto_busca(self.sourceModel().registros[linha]["Nome"])
+        registro = self.sourceModel().registros[linha]
+        return (self.consulta in texto_busca(registro["Nome"])
+                and (not self.sexo or registro["Sexo"] == self.sexo)
+                and (not self.disponibilidade
+                     or texto_busca(registro["Disponibilidade"]) == self.disponibilidade))
 
 
 class Tarefa(QThread):
@@ -495,6 +533,9 @@ class JanelaPrincipal(QMainWindow):
         self._ocupado = False
         self.modo_dashboard = None
         self.indice_dashboard = 0
+        self._ajuste_dashboard = QTimer(self)
+        self._ajuste_dashboard.setSingleShot(True)
+        self._ajuste_dashboard.timeout.connect(self._ajustar_excesso_dashboard)
         self.setWindowTitle("ABC Aprendiz - Ensalamento")
         self.setWindowIcon(QIcon(str(caminho_recurso("assets", "logo_abc_aprendiz.png"))))
         self.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
@@ -522,6 +563,27 @@ class JanelaPrincipal(QMainWindow):
                 painel.setMinimumHeight(altura)
         self.grade_graficos.setMaximumHeight(altura)
         self.grade_graficos.updateGeometry()
+        self._ajuste_dashboard.start(0)
+
+    def _ajustar_excesso_dashboard(self):
+        """Cede apenas poucos pixels dos gráficos quando isso elimina o scroll externo."""
+        if self.modo_dashboard != "desktop" or not self.dashboard.isVisible():
+            return
+        layout = self.dashboard.widget().layout()
+        layout.activate()
+        altura_atual = self.grade_graficos.minimumSizeHint().height()
+        altura_outros = layout.minimumSize().height() - altura_atual
+        disponivel = self.dashboard.viewport().height() - altura_outros
+        preferida = max(ALTURA_GRAFICO_MINIMA, min(ALTURA_GRAFICO_MAXIMA, int(self.height() * 0.48)))
+        excesso = preferida - disponivel
+        altura = disponivel if (0 < excesso <= AJUSTE_MAXIMO_GRAFICOS
+                                 and disponivel >= ALTURA_GRAFICO_MINIMA) else preferida
+        if altura != altura_atual:
+            for painel in self.grade_graficos.widgets:
+                painel.setMinimumHeight(altura)
+            self.grade_graficos.setMaximumHeight(altura)
+            self.grade_graficos.updateGeometry()
+            self._ajuste_dashboard.start(0)
 
     def reorganizar_dashboard(self):
         """Só cruza os modos; mantém widgets, dados, sinais e seleção existentes."""
@@ -626,37 +688,67 @@ class JanelaPrincipal(QMainWindow):
         self.secoes = QStackedWidget()
         self.secoes.setAccessibleName("Seção principal")
         self.navegacao.secao_alterada.connect(self.secoes.setCurrentIndex)
+        self.navegacao.secao_alterada.connect(lambda _: self._ajuste_dashboard.start(0))
         self.secoes.addWidget(self._montar_dashboard())
         alunos, layout_alunos = self._painel()
         alunos.setMinimumSize(360, 200)
-        linha_turma = QHBoxLayout()
-        linha_turma.addWidget(self._rotulo("Alunos por turma", "secao"))
-        linha_turma.addStretch()
-        self.turma_anterior = QPushButton("‹")
+        layout_alunos.addWidget(self._rotulo("Alunos por turma", "secao"))
+        navegacao_turma = QWidget()
+        linha_turma = QHBoxLayout(navegacao_turma)
+        linha_turma.setContentsMargins(0, 0, 0, 0)
+        linha_turma.setSpacing(6)
+        self.turma_anterior = QPushButton()
+        self.turma_anterior.setIcon(QIcon(str(caminho_recurso("assets", "icons", "chevron_left.svg"))))
         self.turma_anterior.setAccessibleName("Turma anterior")
+        self.turma_anterior.setToolTip("Turma anterior")
         self.turma_anterior.clicked.connect(lambda: self.mudar_turma(-1))
-        self.turma_proxima = QPushButton("›")
+        self.turma_proxima = QPushButton()
+        self.turma_proxima.setIcon(QIcon(str(caminho_recurso("assets", "icons", "chevron_right.svg"))))
         self.turma_proxima.setAccessibleName("Próxima turma")
+        self.turma_proxima.setToolTip("Próxima turma")
         self.turma_proxima.clicked.connect(lambda: self.mudar_turma(1))
-        linha_turma.addWidget(self.turma_anterior)
-        linha_turma.addWidget(self.turma_proxima)
-        layout_alunos.addLayout(linha_turma)
-        filtros = QHBoxLayout()
         self.turma = QComboBox()
+        self.turma.setObjectName("seletorTurma")
         self.turma.setAccessibleName("Turma exibida")
         self.turma.setMinimumWidth(160)
         self.turma.currentTextChanged.connect(self.mostrar_turma)
-        filtros.addWidget(self.turma)
+        linha_turma.addWidget(self.turma_anterior)
+        linha_turma.addWidget(self.turma, 1)
+        linha_turma.addWidget(self.turma_proxima)
         self.busca = QLineEdit()
+        self.busca.setObjectName("buscaAlunos")
         self.busca.setPlaceholderText("Buscar nome nesta turma")
         self.busca.setAccessibleName("Buscar aluno nesta turma")
         self.busca.setClearButtonEnabled(True)
-        filtros.addWidget(self.busca, 1)
-        layout_alunos.addLayout(filtros)
+        self.filtro_sexo = QComboBox()
+        self.filtro_sexo.setObjectName("filtroSexo")
+        self.filtro_sexo.setAccessibleName("Filtrar por sexo")
+        for texto, valor in (("Todos", ""), ("Feminino", "F"), ("Masculino", "M")):
+            self.filtro_sexo.addItem(texto, valor)
+        self.filtro_disponibilidade = QComboBox()
+        self.filtro_disponibilidade.setObjectName("filtroDisponibilidade")
+        self.filtro_disponibilidade.setAccessibleName("Filtrar por disponibilidade")
+        for texto, valor in (("Todas", ""), ("Manhã", "Manhã"), ("Tarde", "Tarde")):
+            self.filtro_disponibilidade.addItem(texto, valor)
+        campos = []
+        for titulo, controle in (("Turma", navegacao_turma), ("Buscar por nome", self.busca),
+                                 ("Sexo", self.filtro_sexo), ("Disponibilidade", self.filtro_disponibilidade)):
+            campo = QWidget()
+            caixa_campo = QVBoxLayout(campo)
+            caixa_campo.setContentsMargins(0, 0, 0, 0)
+            caixa_campo.setSpacing(4)
+            caixa_campo.addWidget(self._rotulo(titulo))
+            caixa_campo.addWidget(controle)
+            campos.append(campo)
+        self.controles_alunos = GradeResponsiva(campos, 260, (4, 2, 1))
+        layout_alunos.addWidget(self.controles_alunos)
         self.modelo = ModeloAlunos(self)
         self.filtro = FiltroAlunos(self)
         self.filtro.setSourceModel(self.modelo)
         self.busca.textChanged.connect(self.filtro.pesquisar)
+        self.busca.textChanged.connect(self.atualizar_contagem)
+        self.filtro_sexo.currentIndexChanged.connect(self.atualizar_filtros)
+        self.filtro_disponibilidade.currentIndexChanged.connect(self.atualizar_filtros)
         self.filtro.rowsInserted.connect(self.atualizar_contagem)
         self.filtro.rowsRemoved.connect(self.atualizar_contagem)
         self.filtro.modelReset.connect(self.atualizar_contagem)
@@ -701,7 +793,7 @@ class JanelaPrincipal(QMainWindow):
             linha.setSpacing(8)
             linha.addWidget(icone_widget(icone))
             linha.addWidget(self._rotulo(titulo, "secao"), 1)
-            contador = ContadorOcorrencias()
+            contador = ContadorOcorrencias(tipo="avisos" if titulo == "Avisos" else "inconsistencias")
             linha.addWidget(contador)
             self.contadores_ocorrencias.append(contador)
             caixa.addLayout(linha)
@@ -909,6 +1001,8 @@ class JanelaPrincipal(QMainWindow):
         self.exportar.setEnabled(self.resultado is not None and not self._ocupado)
         self.turma.setEnabled(self.resultado is not None)
         self.busca.setEnabled(self.resultado is not None)
+        self.filtro_sexo.setEnabled(self.resultado is not None)
+        self.filtro_disponibilidade.setEnabled(self.resultado is not None)
         self.turma_anterior.setEnabled(self.turma.currentIndex() > 0)
         self.turma_proxima.setEnabled(0 <= self.turma.currentIndex() < self.turma.count() - 1)
 
@@ -927,6 +1021,8 @@ class JanelaPrincipal(QMainWindow):
         self.turma.clear()
         self.modelo.definir([])
         self.busca.clear()
+        self.filtro_sexo.setCurrentIndex(0)
+        self.filtro_disponibilidade.setCurrentIndex(0)
         for numero in self.indicadores:
             numero.setText("—")
         for detalhe in self.detalhes_indicadores:
@@ -1036,6 +1132,7 @@ class JanelaPrincipal(QMainWindow):
                 else:
                     texto = str(dados[chave])
                 rotulo.setText(texto)
+        self._ajuste_dashboard.start(0)
 
     def mostrar_turma(self, nome):
         self.busca.clear()
@@ -1049,6 +1146,10 @@ class JanelaPrincipal(QMainWindow):
     def atualizar_contagem(self, *_):
         if hasattr(self, "contagem"):
             self.contagem.setText(f"{self.filtro.rowCount()} de {self.modelo.rowCount()} alunos nesta turma")
+
+    def atualizar_filtros(self, *_):
+        self.filtro.filtrar(self.filtro_sexo.currentData(), self.filtro_disponibilidade.currentData())
+        self.atualizar_contagem()
 
     def mudar_turma(self, passo):
         indice = self.turma.currentIndex() + passo

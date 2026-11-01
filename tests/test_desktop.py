@@ -509,7 +509,7 @@ class InterfaceTest(unittest.TestCase):
         w.navegacao.botoes[0].click()
         self.assertEqual(w.secoes.currentIndex(), 0)
         icones = list(caminho_recurso("assets", "icons").glob("*.svg"))
-        self.assertEqual(len(icones), 10)
+        self.assertIn("chevron_down.svg", {arquivo.name for arquivo in icones})
         for arquivo in icones:
             self.assertTrue(QSvgRenderer(str(arquivo)).isValid(), str(arquivo))
         with tempfile.TemporaryDirectory() as pasta:
@@ -518,6 +518,7 @@ class InterfaceTest(unittest.TestCase):
                 arquivo = caminho_recurso("assets", "icons", "tab_inconsistencias.svg")
                 self.assertEqual(arquivo, Path(pasta) / "assets" / "icons" / "tab_inconsistencias.svg")
                 self.assertTrue(QSvgRenderer(str(arquivo)).isValid())
+                self.assertTrue(QSvgRenderer(str(caminho_recurso("assets", "icons", "chevron_down.svg"))).isValid())
 
     def test_avisos_e_inconsistencias_separam_apenas_a_apresentacao(self):
         resultado = amostra()
@@ -649,6 +650,91 @@ class InterfaceTest(unittest.TestCase):
         self.assertFalse(w.turma_proxima.isEnabled())
         self.assertIn("NOMES DUPLICADOS", w.avisos.toPlainText())
         self.assertEqual(w.indicadores[0].text(), "3 / 3")
+
+    def test_filtros_de_sexo_disponibilidade_busca_e_turma_se_combinam(self):
+        w = self.janela
+        resultado = amostra()
+        metricas_antes = json.dumps(resultado.metricas, sort_keys=True)
+        w.mostrar_resultado(resultado)
+        indicadores_antes = [r.text() for r in w.indicadores]
+        self.assertEqual([w.filtro_sexo.itemText(i) for i in range(3)], ["Todos", "Feminino", "Masculino"])
+        self.assertEqual([w.filtro_disponibilidade.itemText(i) for i in range(3)], ["Todas", "Manhã", "Tarde"])
+        w.filtro_sexo.setCurrentText("Feminino")
+        self.assertEqual(w.filtro.rowCount(), 1)
+        self.assertEqual(w.filtro.index(0, 0).data(), "Ágata")
+        self.assertEqual(w.modelo.rowCount(), 2)
+        self.assertEqual(w.contagem.text(), "1 de 2 alunos nesta turma")
+        w.busca.setText("AGATA")
+        self.assertEqual(w.filtro.rowCount(), 1)
+        w.busca.setText("joao")
+        self.assertEqual(w.filtro.rowCount(), 0)
+        self.assertEqual(w.contagem.text(), "0 de 2 alunos nesta turma")
+        w.filtro_sexo.setCurrentText("Masculino")
+        self.assertEqual(w.filtro.rowCount(), 1)
+        w.filtro_disponibilidade.setCurrentText("Tarde")
+        self.assertEqual(w.filtro.rowCount(), 0)
+        w.turma.setCurrentText("TARDE - C")
+        self.assertEqual(w.busca.text(), "")  # Mantém o comportamento anterior ao trocar a turma.
+        self.assertEqual(w.filtro.rowCount(), 1)
+        self.assertEqual(w.contagem.text(), "1 de 1 alunos nesta turma")
+        w.filtro_disponibilidade.setCurrentText("Manhã")
+        self.assertEqual(w.filtro.rowCount(), 0)
+        w.filtro_disponibilidade.setCurrentText("Todas")
+        w.filtro_sexo.setCurrentText("Todos")
+        w.turma.setCurrentText("MANHÃ - A")
+        self.assertEqual(w.filtro.rowCount(), 2)
+        self.assertIs(w.modelo.registros, resultado.grupos["MANHÃ - A"])
+        self.assertEqual(json.dumps(resultado.metricas, sort_keys=True), metricas_antes)
+        self.assertEqual([r.text() for r in w.indicadores], indicadores_antes)
+
+    def test_controles_de_alunos_refluem_e_preservam_filtros(self):
+        w = self.janela
+        w.mostrar_resultado(amostra())
+        w.mudar_secao(1)
+        w.filtro_sexo.setCurrentText("Masculino")
+        w.filtro_disponibilidade.setCurrentText("Manhã")
+        w.busca.setText("joao")
+        modelo = w.modelo
+        for largura, altura, colunas in ((1920, 1080, 4), (1366, 768, 4), (680, 600, 2)):
+            w.resize(largura, altura)
+            QTest.qWait(50)
+            self.assertEqual(w.controles_alunos.colunas, colunas)
+            self.assertEqual(w.centralWidget().horizontalScrollBar().maximum(), 0)
+            self.assertIs(w.modelo, modelo)
+            self.assertEqual(w.filtro.rowCount(), 1)
+            w.mudar_secao(0)
+            w.mudar_secao(1)
+            self.assertEqual(w.filtro_sexo.currentText(), "Masculino")
+            self.assertEqual(w.filtro_disponibilidade.currentText(), "Manhã")
+            self.assertEqual(w.busca.text(), "joao")
+        self.assertIs(w.turma.parentWidget(), w.turma_anterior.parentWidget())
+        self.assertIs(w.turma.parentWidget(), w.turma_proxima.parentWidget())
+        self.assertEqual(w.turma_anterior.toolTip(), "Turma anterior")
+        self.assertEqual(w.turma_proxima.toolTip(), "Próxima turma")
+        self.assertFalse(w.turma_anterior.isEnabled())
+        w.turma_proxima.click()
+        self.assertEqual(w.turma.currentText(), "MANHÃ - B")
+        w.turma_anterior.click()
+        self.assertEqual(w.turma.currentText(), "MANHÃ - A")
+        w.definir_arquivo(Path("outra.xlsx"))
+        self.assertEqual(w.filtro_sexo.currentText(), "Todos")
+        self.assertEqual(w.filtro_disponibilidade.currentText(), "Todas")
+        self.assertFalse(w.filtro_sexo.isEnabled())
+        self.assertFalse(w.filtro_disponibilidade.isEnabled())
+
+    def test_dashboard_cede_apenas_o_pequeno_excesso_vertical(self):
+        w = self.janela
+        w.mostrar_resultado(amostra())
+        for altura in (1080, 1040, 1024, 1000):
+            w.resize(1920, altura)
+            QTest.qWait(60)
+            self.assertEqual(w.dashboard.verticalScrollBar().maximum(), 0)
+            preferida = int(altura * 0.48)
+            self.assertLessEqual(preferida - w.grade_graficos.height(), 32)
+            self.assertGreaterEqual(w.grade_graficos.height(), 400)
+        w.resize(1920, 1080)
+        QTest.qWait(60)
+        self.assertEqual(w.grade_graficos.height(), int(1080 * 0.48))
 
     def test_tabela_virtual_nao_cria_widgets_por_aluno_e_mantem_espaco(self):
         w = self.janela

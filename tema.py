@@ -1,6 +1,7 @@
 """Identidade visual ABC Aprendiz: cores, dimensões e QSS compartilhados."""
 from string import Template
 from PySide6.QtGui import QFont
+from recursos import caminho_recurso
 
 AZUL = "#2A469A"
 TURQUESA = "#3DBD9D"
@@ -39,7 +40,9 @@ FONTE_EIXO = 14
 FONTE_TITULO = 17
 ALTURA_GRAFICO_MINIMA = 400
 ALTURA_GRAFICO_MAXIMA = 560
+AJUSTE_MAXIMO_GRAFICOS = 32
 ALTURA_EIXO = 66
+CHEVRON_DROPDOWN = caminho_recurso("assets", "icons", "chevron_down.svg").as_posix()
 
 
 def fonte_interface(tamanho=FONTE_BASE, peso=QFont.Weight.Normal):
@@ -74,6 +77,8 @@ QLabel#turnoTabela { font-size: 14px; font-weight: 500; color: $AZUL; padding: 5
 QLabel#cabecalhoTabela { font-size: 13px; font-weight: 500; color: $AZUL; background: $FUNDO_AZUL; padding: 7px 3px; }
 QLabel#badgeOcorrencias { color: $ALERTA; font-size: 12px; font-weight: 600; }
 QLabel#badgeOcorrencias[vazio="true"] { color: $TEXTO_SECUNDARIO; }
+QLabel#badgeOcorrencias[tipo="inconsistencias"] { color: $ALERTA; }
+QLabel#badgeOcorrencias[tipo="avisos"] { color: $AZUL; }
 QFrame#separador { background: $BORDA; border: none; }
 QFrame#navegacao { background: white; border: 1px solid $BORDA; border-radius: ${RAIO}px; }
 QFrame#marcador { background: $AZUL; border: none; border-radius: 2px; }
@@ -95,6 +100,18 @@ QPushButton:focus, QLineEdit:focus, QComboBox:focus { border-color: $AZUL; }
 QLineEdit, QComboBox { background: white; border: 1px solid $BORDA; border-radius: 8px;
                      padding: 7px 10px; min-height: 20px; }
 QComboBox::drop-down { border: none; width: 24px; }
+QComboBox#seletorTurma, QComboBox#filtroSexo, QComboBox#filtroDisponibilidade {
+    padding: 8px 38px 8px 10px;
+}
+QLineEdit#buscaAlunos { padding: 8px 10px; }
+QComboBox#seletorTurma::drop-down, QComboBox#filtroSexo::drop-down, QComboBox#filtroDisponibilidade::drop-down {
+    subcontrol-origin: padding; subcontrol-position: top right; width: 30px;
+    background: $FUNDO_AZUL; border-left: 1px solid $BORDA;
+    border-top-right-radius: 8px; border-bottom-right-radius: 8px;
+}
+QComboBox#seletorTurma::down-arrow, QComboBox#filtroSexo::down-arrow, QComboBox#filtroDisponibilidade::down-arrow {
+    image: url("$CHEVRON_DROPDOWN"); width: 14px; height: 14px;
+}
 QComboBox QAbstractItemView { selection-background-color: $FUNDO_AZUL; selection-color: $TEXTO; }
 QTableView { background: white; alternate-background-color: #F3F6FC; border: none;
              selection-background-color: #E1E8F8; selection-color: $TEXTO; gridline-color: $BORDA; }
