@@ -675,6 +675,7 @@ class JanelaPrincipal(QMainWindow):
         self.registros_ocorrencias = []
         self.alunos_validos = 0
         self._revalidar_entrada_apos_falha = False
+        self._gerar_apos_revalidacao = False
         self.execucao_relatorio = None
         self.modo_acoes_arquivo = None
         self._tarefa = None
@@ -1015,17 +1016,15 @@ class JanelaPrincipal(QMainWindow):
                 caixa.addWidget(self.formulario_inconsistencias)
                 acoes_correcao = QHBoxLayout()
                 acoes_correcao.setSpacing(8)
-                self.botao_salvar_correcoes = QPushButton("Salvar alterações")
-                self.botao_salvar_correcoes.setObjectName("exportar")
+                self.botao_salvar_correcoes = QPushButton("Salvar e gerar distribuição")
+                self.botao_salvar_correcoes.setObjectName("primario")
                 self.botao_salvar_correcoes.setToolTip(
-                    "Aplicar as correções e exclusões selecionadas, depois revalidar sem executar o solver."
+                    "Aplicar as alterações selecionadas, revalidar os dados e gerar a distribuição."
                 )
                 self.botao_salvar_correcoes.setEnabled(False)
-                self.botao_salvar_correcoes.clicked.connect(self.salvar_correcoes)
-                self.gerar_validos = QPushButton("Gerar distribuição com novos registros válidos")
-                self.gerar_validos.setObjectName("primario")
-                self.gerar_validos.setEnabled(False)
-                self.gerar_validos.clicked.connect(self.gerar_com_registros_validos)
+                self.botao_salvar_correcoes.clicked.connect(self.salvar_e_gerar_distribuicao)
+                # Mantém o nome antigo apontando para o único botão da ação combinada.
+                self.gerar_validos = self.botao_salvar_correcoes
             else:
                 self.formulario_avisos = QWidget()
                 self.formulario_avisos_layout = QVBoxLayout(self.formulario_avisos)
@@ -1048,9 +1047,7 @@ class JanelaPrincipal(QMainWindow):
         barra_acoes = QFrame()
         barra_acoes.setObjectName("painel")
         acoes_correcao.setContentsMargins(12, 8, 12, 8)
-        acoes_correcao.addWidget(self.botao_salvar_correcoes)
-        acoes_correcao.addSpacing(8)
-        acoes_correcao.addWidget(self.gerar_validos)
+        acoes_correcao.addWidget(self.botao_salvar_correcoes, 1)
         barra_acoes.setLayout(acoes_correcao)
         layout_pagina_ocorrencias.addWidget(barra_acoes)
         self.relatorio, self.avisos = editores
@@ -1281,6 +1278,7 @@ class JanelaPrincipal(QMainWindow):
         self.registros_ocorrencias = []
         self.alunos_validos = 0
         self._revalidar_entrada_apos_falha = False
+        self._gerar_apos_revalidacao = False
         self.execucao_relatorio = None
         self.nome_arquivo.setText(self.arquivo.name)
         self.nome_arquivo.setToolTip(str(self.arquivo))
@@ -1316,7 +1314,9 @@ class JanelaPrincipal(QMainWindow):
         self.contagem.setText("Sem distribuição.")
         self._atualizar_botoes()
 
-    def _iniciar_tarefa(self, funcao, args, ao_concluir=None, *, distribuindo=False, ao_falhar=None):
+    def _iniciar_tarefa(
+        self, funcao, args, ao_concluir=None, *, distribuindo=False, ao_falhar=None, mensagem=None
+    ):
         if self._ocupado:
             return
         self._limpar_erro()
@@ -1327,7 +1327,7 @@ class JanelaPrincipal(QMainWindow):
         self._tarefa = Tarefa(funcao, *args, cancelavel=cancelavel, parent=self)
         self.cancelar_distribuicao.setVisible(cancelavel)
         self.cancelar_distribuicao.setEnabled(cancelavel)
-        self.mensagem_carregamento.setText("Aguarde. A distribuição está sendo gerada.")
+        self.mensagem_carregamento.setText(mensagem or "Aguarde. A distribuição está sendo gerada.")
         if ao_concluir is not None:
             self._tarefa.concluida.connect(ao_concluir)
         self._tarefa.falhou.connect(ao_falhar or self._falhou)
@@ -1362,13 +1362,6 @@ class JanelaPrincipal(QMainWindow):
             else:
                 self.definir_arquivo(self.arquivo)
                 self._iniciar_tarefa(self.processador, (self.arquivo,), self.mostrar_resultado, distribuindo=True)
-
-    def gerar_com_registros_validos(self):
-        if self.arquivo is not None and self.planilha_trabalho is not None and self.alunos_validos and not self._ocupado:
-            self._iniciar_tarefa(
-                processar_planilha_bytes, (self.arquivo, self.planilha_trabalho),
-                self.mostrar_resultado, distribuindo=True,
-            )
 
     def mostrar_resultado(self, resultado: ResultadoInterface):
         self._limpar_erro()
@@ -1508,11 +1501,8 @@ class JanelaPrincipal(QMainWindow):
             for item in self.edicoes_duplicidades
         )
         self.botao_salvar_correcoes.setEnabled(alguma and not self._ocupado)
-        if hasattr(self, "gerar_validos"):
-            self.gerar_validos.setVisible(True)
-            self.gerar_validos.setEnabled(bool(self.planilha_trabalho and self.alunos_validos) and not self._ocupado)
 
-    def salvar_correcoes(self):
+    def salvar_e_gerar_distribuicao(self):
         if self.planilha_trabalho is None or self._ocupado:
             return
         correcoes = []
@@ -1531,8 +1521,14 @@ class JanelaPrincipal(QMainWindow):
         if correcoes or exclusoes:
             self._iniciar_tarefa(
                 revalidar_correcoes, (self.planilha_trabalho, correcoes, exclusoes),
-                self._revalidacao_concluida,
+                self._revalidacao_concluida_e_gerar,
+                distribuindo=True,
+                mensagem="Salvando alterações e validando os dados…",
             )
+
+    def _revalidacao_concluida_e_gerar(self, resultado):
+        self._revalidacao_concluida(resultado)
+        self._gerar_apos_revalidacao = self.alunos_validos > 0
 
     def _mostrar_formulario_avisos(self):
         self._limpar_formulario_avisos()
@@ -1738,7 +1734,12 @@ class JanelaPrincipal(QMainWindow):
 
     def exportar_para(self, destino):
         if self.resultado is not None:
-            self._iniciar_tarefa(self.exportador, (self.resultado, Path(destino)))
+            self._iniciar_tarefa(
+                self.exportador,
+                (self.resultado, Path(destino)),
+                distribuindo=True,
+                mensagem="Gerando arquivo Excel…",
+            )
 
     def escolher_destino_pdf(self):
         if self.resultado is None or self._ocupado:
@@ -1758,6 +1759,8 @@ class JanelaPrincipal(QMainWindow):
             self._iniciar_tarefa(
                 self.exportador_pdf, (self.resultado, Path(destino), self.execucao_relatorio),
                 ao_falhar=self._falhou_pdf,
+                distribuindo=True,
+                mensagem="Gerando relatório em PDF…",
             )
 
     def _falhou_pdf(self, mensagem):
@@ -1790,6 +1793,14 @@ class JanelaPrincipal(QMainWindow):
         self.cancelar_distribuicao.setEnabled(False)
         self._tarefa.deleteLater()
         self._tarefa = None
+        if self._gerar_apos_revalidacao:
+            self._gerar_apos_revalidacao = False
+            if self.arquivo is not None and self.planilha_trabalho is not None and self.alunos_validos > 0:
+                self._iniciar_tarefa(
+                    processar_planilha_bytes, (self.arquivo, self.planilha_trabalho),
+                    self.mostrar_resultado, distribuindo=True,
+                )
+                return
         if self._revalidar_entrada_apos_falha and self.arquivo is not None:
             self._revalidar_entrada_apos_falha = False
             try:
