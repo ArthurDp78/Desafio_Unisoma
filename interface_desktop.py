@@ -28,6 +28,8 @@ from tema import (
     ALTURA_GRAFICO_MINIMA, ALTURA_GRAFICO_MAXIMA,
     FUNDO_ALERTA, CONTADOR_MINIMO,
     ESPACO_SECOES, PADDING_ABA_VERTICAL, PADDING_ABA_HORIZONTAL, fonte_interface,
+    LIMITE_TURMAS_VARIACAO,
+    PADDING_INTERNO,
 )
 
 LARGURA_DASHBOARD_DESKTOP = 1200
@@ -133,8 +135,7 @@ class NavegacaoSecoes(QFrame):
             conteudo.addStretch()
             botao.setCheckable(True)
             botao.setAccessibleName(titulo)
-            botao.setShortcut(f"Alt+{indice + 1}")
-            botao.setToolTip(f"{titulo} (Alt+{indice + 1})")
+            botao.setToolTip(titulo)
             self.grupo.addButton(botao, indice)
             self.botoes.append(botao)
             layout.addWidget(botao, 1)
@@ -170,7 +171,7 @@ class NavegacaoSecoes(QFrame):
         descricao = f"{inconsistencias} inconsistências e {avisos} avisos; {total} ocorrências"
         self.badge.setAccessibleName(descricao)
         self.botoes[2].setAccessibleName(f"Inconsistências e avisos: {descricao}")
-        self.botoes[2].setToolTip(descricao + " (Alt+3)")
+        self.botoes[2].setToolTip(descricao)
 
     def _posicionar(self, animar=False):
         botao = self.botoes[self.indice]
@@ -472,7 +473,7 @@ class EixoHorizontal(QWidget):
             painter.drawLine(int(x), 2, int(x), 7)
             painter.setPen(QColor(TEXTO))
             painter.drawText(QRectF(x - 30, 11, 60, 21), Qt.AlignmentFlag.AlignCenter, str(indice * passo))
-        painter.setFont(fonte_grafico(FONTE_EIXO, QFont.Weight.DemiBold))
+        painter.setFont(fonte_grafico(FONTE_EIXO, QFont.Weight.Medium))
         painter.setPen(QColor(TEXTO))
         painter.drawText(QRectF(esquerda, 36, direita - esquerda, 25), Qt.AlignmentFlag.AlignCenter, self.titulo)
 
@@ -488,7 +489,7 @@ class JanelaPrincipal(QMainWindow):
         self._ocupado = False
         self.modo_dashboard = None
         self.indice_dashboard = 0
-        self.setWindowTitle("ABC Aprendiz — Ensalamento")
+        self.setWindowTitle("ABC Aprendiz - Ensalamento")
         self.setWindowIcon(QIcon(str(caminho_recurso("assets", "logo_abc_aprendiz.png"))))
         self.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
         self.setMinimumSize(680, 600)
@@ -578,7 +579,7 @@ class JanelaPrincipal(QMainWindow):
         logo.setAccessibleName("ABC Aprendiz")
         cabecalho.addWidget(logo)
         cabecalho.addStretch()
-        cabecalho.addWidget(self._rotulo("Ensalamento", "titulo"))
+        cabecalho.addWidget(self._rotulo("Sistema de Ensalamento", "titulo"))
         principal.addLayout(cabecalho)
         arquivo, linha_arquivo = self._painel()
         acoes = QHBoxLayout()
@@ -587,12 +588,7 @@ class JanelaPrincipal(QMainWindow):
         acoes.addWidget(self.importar)
         self.nome_arquivo = self._rotulo("Nenhuma planilha selecionada")
         self.nome_arquivo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.nome_arquivo.setMaximumWidth(self.nome_arquivo.sizeHint().width())
         acoes.addWidget(self.nome_arquivo, 1)
-        self.status = self._rotulo("Selecione uma planilha XLSX.")
-        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        acoes.addWidget(self.status, 4)
         self.gerar = QPushButton("Gerar distribuição")
         self.gerar.setObjectName("primario")
         self.gerar.setEnabled(False)
@@ -605,6 +601,20 @@ class JanelaPrincipal(QMainWindow):
         acoes.addWidget(self.exportar)
         linha_arquivo.addLayout(acoes)
         principal.addWidget(arquivo)
+        self.carregamento = QWidget()
+        linha_carregamento = QVBoxLayout(self.carregamento)
+        linha_carregamento.setContentsMargins(0, 0, 0, 0)
+        linha_carregamento.setSpacing(6)
+        self.mensagem_carregamento = self._rotulo("Aguarde. A distribuição está sendo gerada.")
+        self.mensagem_carregamento.setWordWrap(True)
+        linha_carregamento.addWidget(self.mensagem_carregamento)
+        self.progresso = QProgressBar()
+        self.progresso.setRange(0, 0)
+        self.progresso.setTextVisible(False)
+        self.progresso.setFixedHeight(4)
+        linha_carregamento.addWidget(self.progresso)
+        self.carregamento.hide()
+        principal.addWidget(self.carregamento)
         self.navegacao = NavegacaoSecoes()
         principal.addWidget(self.navegacao)
         self.secoes = QStackedWidget()
@@ -709,12 +719,6 @@ class JanelaPrincipal(QMainWindow):
         self.secoes.setMinimumHeight(self.secoes.minimumSizeHint().height())
         self.secoes.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         principal.addWidget(self.secoes, 1)
-        self.progresso = QProgressBar()
-        self.progresso.setRange(0, 0)
-        self.progresso.setTextVisible(False)
-        self.progresso.setFixedHeight(4)
-        self.progresso.hide()
-        principal.addWidget(self.progresso)
         self._atualizar_botoes()
 
     def _montar_dashboard(self):
@@ -810,9 +814,10 @@ class JanelaPrincipal(QMainWindow):
 
         qualidade, caixa = self._painel()
         self._titulo_painel(caixa, "Qualidade da distribuição", "card_qualidade")
-        equilibrio = QWidget()
+        equilibrio = QFrame()
+        equilibrio.setObjectName("quadroQualidade")
         area_equilibrio = QVBoxLayout(equilibrio)
-        area_equilibrio.setContentsMargins(0, 0, 0, 0)
+        area_equilibrio.setContentsMargins(PADDING_INTERNO, PADDING_INTERNO, PADDING_INTERNO, PADDING_INTERNO)
         area_equilibrio.setSpacing(6)
         area_equilibrio.addWidget(self._rotulo("Equilíbrio entre turmas", "subtitulo"))
         explicacao = self._rotulo("Maior diferença de tamanho no mesmo turno.")
@@ -829,9 +834,10 @@ class JanelaPrincipal(QMainWindow):
             self.diferencas_turmas[turno] = rotulo
         area_equilibrio.addLayout(grade_equilibrio)
         area_equilibrio.addStretch()
-        genero = QWidget()
+        genero = QFrame()
+        genero.setObjectName("quadroQualidade")
         area_genero = QVBoxLayout(genero)
-        area_genero.setContentsMargins(0, 0, 0, 0)
+        area_genero.setContentsMargins(PADDING_INTERNO, PADDING_INTERNO, PADDING_INTERNO, PADDING_INTERNO)
         area_genero.setSpacing(6)
         area_genero.addWidget(self._rotulo("Maior variação H/M", "subtitulo"))
         self.variacao_genero = self._rotulo("—", "valorQualidade")
@@ -842,6 +848,7 @@ class JanelaPrincipal(QMainWindow):
         area_genero.addWidget(self.contexto_variacao)
         self.turmas_variacao_genero = self._rotulo("")
         self.turmas_variacao_genero.setWordWrap(True)
+        self.turmas_variacao_genero.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.turmas_variacao_genero.hide()
         area_genero.addWidget(self.turmas_variacao_genero)
         area_genero.addStretch()
@@ -910,7 +917,6 @@ class JanelaPrincipal(QMainWindow):
         self.arquivo = Path(arquivo)
         self.resultado = None
         self.nome_arquivo.setText(self.arquivo.name)
-        self.nome_arquivo.setMaximumWidth(self.nome_arquivo.sizeHint().width())
         self.nome_arquivo.setToolTip(str(self.arquivo))
         self.turma.clear()
         self.modelo.definir([])
@@ -926,6 +932,8 @@ class JanelaPrincipal(QMainWindow):
         self.variacao_genero.setText("—")
         self.variacao_genero.setToolTip("")
         self.turmas_variacao_genero.clear()
+        self.turmas_variacao_genero.setToolTip("")
+        self.turmas_variacao_genero.setAccessibleDescription("")
         self.turmas_variacao_genero.hide()
         self.contexto_variacao.hide()
         for valores in self.resumo_turnos.values():
@@ -936,18 +944,17 @@ class JanelaPrincipal(QMainWindow):
         self.avisos.setPlainText("Nenhuma distribuição realizada para esta planilha.")
         self._atualizar_ocorrencias()
         self.contagem.setText("Sem distribuição.")
-        self.status.setText("Planilha selecionada.")
         self._atualizar_botoes()
 
-    def _iniciar_tarefa(self, funcao, args, ao_concluir, mensagem):
+    def _iniciar_tarefa(self, funcao, args, ao_concluir=None, *, distribuindo=False):
         if self._ocupado:
             return
         self._ocupado = True
-        self.status.setText(mensagem)
-        self.progresso.show()
+        self.carregamento.setVisible(distribuindo)
         self._atualizar_botoes()
         self._tarefa = Tarefa(funcao, *args, parent=self)
-        self._tarefa.concluida.connect(ao_concluir)
+        if ao_concluir is not None:
+            self._tarefa.concluida.connect(ao_concluir)
         self._tarefa.falhou.connect(self._falhou)
         self._tarefa.finished.connect(self._finalizar_tarefa)
         self._tarefa.start()
@@ -955,9 +962,10 @@ class JanelaPrincipal(QMainWindow):
     def gerar_distribuicao(self):
         if self.arquivo is not None and not self._ocupado:
             self.definir_arquivo(self.arquivo)
-            self._iniciar_tarefa(self.processador, (self.arquivo,), self.mostrar_resultado, "Calculando a distribuição…")
+            self._iniciar_tarefa(self.processador, (self.arquivo,), self.mostrar_resultado, distribuindo=True)
 
     def mostrar_resultado(self, resultado: ResultadoInterface):
+        self.carregamento.hide()
         self.resultado = resultado
         self._mostrar_dashboard(resultado.metricas)
         self.turma.blockSignals(True)
@@ -969,7 +977,6 @@ class JanelaPrincipal(QMainWindow):
         self.relatorio.setPlainText(inconsistencias)
         self.avisos.setPlainText(avisos)
         self._atualizar_ocorrencias(*map(len, separar_ocorrencias(resultado)))
-        self.status.setText("Distribuição concluída. A planilha original ainda não foi alterada.")
         self._atualizar_botoes()
 
     def _atualizar_ocorrencias(self, inconsistencias=0, avisos=0):
@@ -1004,9 +1011,13 @@ class JanelaPrincipal(QMainWindow):
         variacao = metricas["destaques"]["variacao_genero"]
         self.variacao_genero.setText(texto_variacao_genero(variacao))
         self.variacao_genero.setToolTip(", ".join(variacao["turmas"]))
-        self.turmas_variacao_genero.setText(
-            "    ".join(nome_turma_visual(nome) for nome in variacao["turmas"]) if variacao["quantidade"] else ""
-        )
+        nomes = [nome_turma_visual(nome) for nome in variacao["turmas"]] if variacao["quantidade"] else []
+        resumo_turmas = ", ".join(nomes[:LIMITE_TURMAS_VARIACAO])
+        if len(nomes) > LIMITE_TURMAS_VARIACAO:
+            resumo_turmas += ", ..."
+        self.turmas_variacao_genero.setText(resumo_turmas)
+        self.turmas_variacao_genero.setToolTip("\n".join(nomes))
+        self.turmas_variacao_genero.setAccessibleDescription(", ".join(nomes))
         self.turmas_variacao_genero.setVisible(bool(variacao["quantidade"]))
         self.contexto_variacao.setVisible(bool(variacao["quantidade"]))
         for turno, rotulos in self.resumo_turnos.items():
@@ -1060,26 +1071,21 @@ class JanelaPrincipal(QMainWindow):
 
     def exportar_para(self, destino):
         if self.resultado is not None:
-            self._iniciar_tarefa(self.exportador, (self.resultado, Path(destino)), self._exportado, "Exportando a planilha…")
-
-    def _exportado(self, destino):
-        self.status.setText(f"Planilha exportada: {destino}")
-        self.status.setToolTip(str(destino))
+            self._iniciar_tarefa(self.exportador, (self.resultado, Path(destino)))
 
     def _falhou(self, mensagem):
-        self.status.setText("Não foi possível concluir a operação.")
+        self.carregamento.hide()
         QMessageBox.critical(self, "Operação não concluída", mensagem)
 
     def _finalizar_tarefa(self):
         self._ocupado = False
-        self.progresso.hide()
+        self.carregamento.hide()
         self._tarefa.deleteLater()
         self._tarefa = None
         self._atualizar_botoes()
 
     def closeEvent(self, evento):
         if self._ocupado:
-            self.status.setText("Aguarde a conclusão da operação antes de fechar.")
             evento.ignore()
         else:
             super().closeEvent(evento)

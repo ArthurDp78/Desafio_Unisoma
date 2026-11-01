@@ -21,7 +21,7 @@ from PySide6.QtCore import QAbstractAnimation, QPoint, QPropertyAnimation, QTime
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QFrame, QStackedWidget, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QProgressBar, QStackedWidget, QWidget
 
 from apresentacao import ResultadoInterface, exportar_planilha, processar_planilha, relatorios_interface
 from recursos import caminho_recurso
@@ -499,6 +499,15 @@ class InterfaceTest(unittest.TestCase):
         self.assertEqual(w.secoes.count(), 3)
         self.assertEqual(len(w.navegacao.findChildren(QSvgWidget)), 3)
         self.assertTrue(all(i.renderer().isValid() for i in w.navegacao.findChildren(QSvgWidget)))
+        w.mostrar_resultado(amostra())
+        for botao in w.navegacao.botoes:
+            self.assertTrue(botao.shortcut().isEmpty())
+            self.assertNotIn("Alt+", botao.toolTip())
+        w.mudar_secao(2)
+        QTest.keyClick(w.navegacao.botoes[2], Qt.Key.Key_1, Qt.KeyboardModifier.AltModifier)
+        self.assertEqual(w.secoes.currentIndex(), 2)
+        w.navegacao.botoes[0].click()
+        self.assertEqual(w.secoes.currentIndex(), 0)
         icones = list(caminho_recurso("assets", "icons").glob("*.svg"))
         self.assertEqual(len(icones), 10)
         for arquivo in icones:
@@ -554,7 +563,22 @@ class InterfaceTest(unittest.TestCase):
         }
         w.mostrar_resultado(resultado)
         self.assertEqual(w.variacao_genero.text(), "3 mulheres a mais · 3 homens a mais")
-        self.assertEqual(w.turmas_variacao_genero.text(), "Manhã · A    Tarde · C")
+        self.assertEqual(w.turmas_variacao_genero.text(), "Manhã · A, Tarde · C")
+        self.assertEqual(w.turmas_variacao_genero.toolTip(), "Manhã · A\nTarde · C")
+        turmas = [f"TARDE - {letra}" for letra in ("P", "R", "S", "U", "W", "Y", "AA", "AC")]
+        resultado.metricas["destaques"]["variacao_genero"]["turmas"] = turmas
+        w.mostrar_resultado(resultado)
+        QTest.qWait(40)
+        self.assertEqual(w.turmas_variacao_genero.text(), "Tarde · P, Tarde · R, Tarde · S, Tarde · U, ...")
+        self.assertEqual(w.turmas_variacao_genero.toolTip().splitlines(),
+                         [f"Tarde · {t.split(' - ')[1]}" for t in turmas])
+        self.assertEqual(resultado.metricas["destaques"]["variacao_genero"]["turmas"], turmas)
+        for largura, altura in ((1920, 1080), (1366, 768), (680, 600)):
+            w.resize(largura, altura)
+            QTest.qWait(40)
+            self.assertEqual(w.dashboard.horizontalScrollBar().maximum(), 0)
+            rotulo = w.turmas_variacao_genero
+            self.assertGreaterEqual(rotulo.height(), rotulo.heightForWidth(rotulo.width()))
         resultado.metricas["destaques"]["variacao_genero"] = {
             "quantidade": 0, "predominancias": ["equilibrado"], "turmas": ["MANHÃ - A"],
         }
@@ -562,6 +586,27 @@ class InterfaceTest(unittest.TestCase):
         self.assertEqual(w.variacao_genero.text(), "Equilibrado")
         self.assertTrue(w.turmas_variacao_genero.isHidden())
         self.assertEqual(w.turmas_variacao_genero.text(), "")
+        self.assertEqual(w.turmas_variacao_genero.toolTip(), "")
+
+    def test_carregamento_oculto_na_selecao_e_no_resultado_sem_reservar_espaco(self):
+        w = self.janela
+        self.assertTrue(w.carregamento.isHidden())
+        self.assertFalse(w.progresso.isVisible())
+        self.assertFalse(w.mensagem_carregamento.isVisible())
+        self.assertIsNone(w.findChild(QFrame, "faixaStatus"))
+        self.assertEqual(w.findChildren(QProgressBar), [w.progresso])
+        principal = w.centralWidget().widget().layout()
+        self.assertEqual(principal.indexOf(w.carregamento), principal.indexOf(w.nome_arquivo.parentWidget()) + 1)
+        self.assertEqual(principal.indexOf(w.navegacao), principal.indexOf(w.carregamento) + 1)
+        w.definir_arquivo(Path("amostra.xlsx"))
+        QTest.qWait(30)
+        posicao_abas = w.navegacao.y()
+        w.mostrar_resultado(amostra())
+        QTest.qWait(30)
+        self.assertTrue(w.carregamento.isHidden())
+        self.assertEqual(w.navegacao.y(), posicao_abas)
+        w.definir_arquivo(Path("outra.xlsx"))
+        self.assertTrue(w.carregamento.isHidden())
 
     def test_dashboard_usa_metricas_como_fonte(self):
         resultado = amostra()
@@ -735,6 +780,8 @@ class InterfaceTest(unittest.TestCase):
             return amostra()
         w.processador = processar
         w.definir_arquivo(Path("amostra.xlsx"))
+        QTest.qWait(30)
+        posicao_abas = w.navegacao.y()
         ticks = []
         timer = QTimer(w)
         timer.setInterval(10)
@@ -746,7 +793,13 @@ class InterfaceTest(unittest.TestCase):
             QTest.qWait(150)
             self.assertGreaterEqual(len(ticks), 3)
             self.assertFalse(w.importar.isEnabled())
+            self.assertFalse(w.gerar.isEnabled())
             self.assertFalse(w.exportar.isEnabled())
+            self.assertTrue(w.mensagem_carregamento.isVisible())
+            self.assertEqual(w.mensagem_carregamento.text(), "Aguarde. A distribuição está sendo gerada.")
+            self.assertTrue(w.progresso.isVisible())
+            self.assertEqual((w.progresso.minimum(), w.progresso.maximum()), (0, 0))
+            self.assertGreater(w.navegacao.y(), posicao_abas)
             self.assertFalse(w.close())
         finally:
             liberar.set()
@@ -755,7 +808,60 @@ class InterfaceTest(unittest.TestCase):
             QTest.qWait(10)
         timer.stop()
         self.assertFalse(w._ocupado)
+        QTest.qWait(30)
+        self.assertTrue(w.carregamento.isHidden())
+        self.assertFalse(w.mensagem_carregamento.isVisible())
+        self.assertFalse(w.progresso.isVisible())
+        self.assertEqual(w.navegacao.y(), posicao_abas)
+        self.assertTrue(w.gerar.isEnabled())
         self.assertEqual(w.modelo.rowCount(), 2)
+        self.assertTrue(w.exportar.isEnabled())
+
+    def test_falha_no_calculo_remove_mensagem_e_linha_de_carregamento(self):
+        w = self.janela
+        def processar(_):
+            raise ValueError("Falha de teste")
+        w.processador = processar
+        w.definir_arquivo(Path("amostra.xlsx"))
+        with patch("interface_desktop.QMessageBox.critical") as alerta:
+            w.gerar_distribuicao()
+            limite = time.monotonic() + 3
+            while w._ocupado and time.monotonic() < limite:
+                QTest.qWait(10)
+            alerta.assert_called_once_with(w, "Operação não concluída", "Falha de teste")
+        self.assertFalse(w._ocupado)
+        self.assertTrue(w.carregamento.isHidden())
+        self.assertFalse(w.progresso.isVisible())
+        self.assertFalse(w.mensagem_carregamento.isVisible())
+        self.assertTrue(w.gerar.isEnabled())
+
+    def test_exportacao_nao_exibe_carregamento_da_distribuicao(self):
+        w = self.janela
+        liberar = threading.Event()
+        iniciou = threading.Event()
+        def exportar(_, destino):
+            iniciou.set()
+            liberar.wait(3)
+            return destino
+        w.exportador = exportar
+        w.definir_arquivo(Path("amostra.xlsx"))
+        w.mostrar_resultado(amostra())
+        w.exportar_para(Path("saida.xlsx"))
+        try:
+            self.assertTrue(iniciou.wait(1))
+            QTest.qWait(40)
+            self.assertTrue(w._ocupado)
+            self.assertTrue(w.carregamento.isHidden())
+            self.assertFalse(w.mensagem_carregamento.isVisible())
+            self.assertFalse(w.progresso.isVisible())
+        finally:
+            liberar.set()
+        limite = time.monotonic() + 3
+        while w._ocupado and time.monotonic() < limite:
+            QTest.qWait(10)
+        self.assertFalse(w._ocupado)
+        self.assertTrue(w.carregamento.isHidden())
+        self.assertTrue(w.gerar.isEnabled())
         self.assertTrue(w.exportar.isEnabled())
 
     def test_importar_outro_arquivo_limpa_resultado_anterior(self):
