@@ -75,6 +75,7 @@ QLabel#avisoConclusao { color: $TEXTO; font-size: 13px; background: $FUNDO_TURQU
                       border: 1px solid $BORDA; border-radius: ${RAIO_INTERNO}px; padding: 8px 12px; }
 QLabel#legenda { color: $TEXTO; font-size: 14px; }
 QLabel#numeroCard { font-size: 24px; font-weight: 500; color: $AZUL; }
+QLabel#numeroCardCapacidade { font-size: 19px; font-weight: 500; color: $AZUL; }
 QLabel#valorQualidade { font-size: 16px; font-weight: 500; color: $AZUL; }
 QLabel#valorTabela { font-size: 14px; font-weight: 500; color: $TEXTO; padding: 5px 2px; }
 QLabel#turnoTabela { font-size: 14px; font-weight: 500; color: $AZUL; padding: 5px 2px; }
@@ -96,6 +97,10 @@ QPushButton#primario:hover { background: #21397F; }
 QPushButton#primario:disabled { background: #DCE3F1; color: #6C7A96; border-color: #DCE3F1; }
 QPushButton#exportar { background: white; color: $AZUL; border-color: #A7B8DE; }
 QPushButton#exportar:hover { background: $FUNDO_AZUL; }
+QPushButton#exportar:disabled { background: #DCE3F1; color: #6C7A96; border-color: #DCE3F1; }
+QPushButton#cancelar { background: $FUNDO_ALERTA; color: $ALERTA; border-color: $BORDA_ALERTA; }
+QPushButton#cancelar:hover { background: #FFE8C7; border-color: $ALERTA; }
+QPushButton#cancelar:disabled { color: #9A8668; background: $FUNDO_ALERTA; border-color: $BORDA_ALERTA; }
 QPushButton#navegacaoBotao { background: transparent; border: none; border-radius: 8px;
                           color: $TEXTO_SECUNDARIO; padding: 0; }
 QLabel#textoNavegacao { color: $TEXTO_SECUNDARIO; font-size: 14px; font-weight: 400; }

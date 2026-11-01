@@ -2,8 +2,14 @@
 from __future__ import annotations
 
 from math import ceil
+import multiprocessing
+import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
+import tempfile
+import threading
 
 from PySide6.QtCore import QAbstractTableModel, QEasingCurve, QModelIndex, QPropertyAnimation, QPoint, QRect, QRectF, QSortFilterProxyModel, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen, QPixmap
@@ -48,6 +54,34 @@ def icone_widget(nome, tamanho=ICONE):
 
 def fonte_grafico(tamanho=FONTE_GRAFICO, peso=QFont.Weight.Normal):
     return fonte_interface(tamanho, peso)
+
+
+def criar_legenda_grafico(itens):
+    """Legenda visual com amostras de cor associadas aos rótulos."""
+    legenda = QWidget()
+    legenda.setObjectName("legendaGrafico")
+    linha = QHBoxLayout(legenda)
+    linha.setContentsMargins(0, 0, 0, 0)
+    linha.setSpacing(14)
+    for cor, texto in itens:
+        item = QWidget(legenda)
+        conteudo = QHBoxLayout(item)
+        conteudo.setContentsMargins(0, 0, 0, 0)
+        conteudo.setSpacing(6)
+        amostra = QFrame(item)
+        amostra.setObjectName("amostraLegenda")
+        amostra.setFixedSize(14, 14)
+        amostra.setStyleSheet(
+            f"QFrame#amostraLegenda {{ background: {cor}; border: 1px solid {BORDA}; border-radius: 3px; }}"
+        )
+        amostra.setAccessibleName(f"Amostra de cor: {texto}")
+        conteudo.addWidget(amostra, 0, Qt.AlignmentFlag.AlignVCenter)
+        rotulo = QLabel(texto, item)
+        rotulo.setObjectName("legenda")
+        conteudo.addWidget(rotulo, 0, Qt.AlignmentFlag.AlignVCenter)
+        linha.addWidget(item)
+    linha.addStretch(1)
+    return legenda
 
 
 class ContadorOcorrencias(QLabel):
@@ -337,20 +371,124 @@ class FiltroAlunos(QSortFilterProxyModel):
                      or texto_busca(registro["Disponibilidade"]) == self.disponibilidade))
 
 
+def _executar_tarefa_cancelavel(conexao, pasta_temporaria, funcao, argumentos):
+    """Executa o processamento em processo próprio para permitir interromper o CBC."""
+    tempfile.tempdir = pasta_temporaria
+    try:
+        conexao.send((True, funcao(*argumentos)))
+    except BaseException as erro:
+        try:
+            conexao.send((False, str(erro)))
+        except (BrokenPipeError, EOFError, OSError):
+            pass
+    finally:
+        conexao.close()
+
+
+def _encerrar_processo_e_descendentes(processo):
+    """Encerra o worker e o CBC que ele iniciou no Windows."""
+    if not processo.is_alive():
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(processo.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if processo.is_alive():
+        processo.terminate()
+    processo.join()
+
+
 class Tarefa(QThread):
     concluida = Signal(object)
     falhou = Signal(str)
+    cancelada = Signal()
 
-    def __init__(self, funcao, *args, parent=None):
+    def __init__(self, funcao, *args, cancelavel=False, parent=None):
         super().__init__(parent)
         self.funcao = funcao
         self.args = args
+        self.cancelavel = cancelavel
+        self._cancelamento = threading.Event()
+        self._processo = None
+
+    @property
+    def cancelamento_solicitado(self):
+        return self._cancelamento.is_set()
+
+    def cancelar(self):
+        if self.cancelavel and self.isRunning():
+            self._cancelamento.set()
 
     def run(self):
+        if self.cancelavel:
+            self._run_cancelavel()
+            return
         try:
             self.concluida.emit(self.funcao(*self.args))
         except Exception as erro:
             self.falhou.emit(str(erro))
+
+    def _run_cancelavel(self):
+        recebimento = envio = processo = pasta_temporaria = None
+        cancelada = False
+        resposta = None
+        try:
+            contexto = multiprocessing.get_context("spawn")
+            recebimento, envio = contexto.Pipe(duplex=False)
+            pasta_temporaria = Path(tempfile.mkdtemp(prefix="abc_cancelamento_"))
+            processo = contexto.Process(
+                target=_executar_tarefa_cancelavel,
+                args=(envio, str(pasta_temporaria), self.funcao, self.args),
+            )
+            self._processo = processo
+            processo.start()
+            envio.close()
+            while processo.is_alive():
+                if self._cancelamento.wait(0.05):
+                    cancelada = True
+                    _encerrar_processo_e_descendentes(processo)
+                    break
+                if resposta is None and recebimento.poll():
+                    resposta = recebimento.recv()
+                processo.join(0.05)
+            if self._cancelamento.is_set():
+                cancelada = True
+            if not cancelada and resposta is None and recebimento.poll():
+                resposta = recebimento.recv()
+            if not cancelada:
+                if resposta is None:
+                    self.falhou.emit("O processamento foi encerrado sem retornar um resultado.")
+                elif resposta[0]:
+                    self.concluida.emit(resposta[1])
+                else:
+                    self.falhou.emit(resposta[1])
+        except Exception as erro:
+            self.falhou.emit(str(erro))
+        finally:
+            if processo is not None:
+                if processo.is_alive():
+                    _encerrar_processo_e_descendentes(processo)
+                if processo.pid is not None:
+                    processo.join()
+            for conexao in (recebimento, envio):
+                if conexao is not None:
+                    try:
+                        conexao.close()
+                    except OSError:
+                        pass
+            if pasta_temporaria is not None:
+                shutil.rmtree(pasta_temporaria, ignore_errors=True)
+            self._processo = None
+        if cancelada:
+            self.cancelada.emit()
 
 
 class GradeResponsiva(QWidget):
@@ -707,9 +845,18 @@ class JanelaPrincipal(QMainWindow):
         linha_carregamento = QVBoxLayout(self.carregamento)
         linha_carregamento.setContentsMargins(0, 0, 0, 0)
         linha_carregamento.setSpacing(6)
+        linha_mensagem = QHBoxLayout()
         self.mensagem_carregamento = self._rotulo("Aguarde. A distribuição está sendo gerada.")
         self.mensagem_carregamento.setWordWrap(True)
-        linha_carregamento.addWidget(self.mensagem_carregamento)
+        linha_mensagem.addWidget(self.mensagem_carregamento, 1)
+        self.cancelar_distribuicao = QPushButton("Cancelar")
+        self.cancelar_distribuicao.setObjectName("cancelar")
+        self.cancelar_distribuicao.setAccessibleName("Cancelar geração da distribuição")
+        self.cancelar_distribuicao.setToolTip("Interromper o cálculo em andamento")
+        self.cancelar_distribuicao.clicked.connect(self.solicitar_cancelamento)
+        self.cancelar_distribuicao.hide()
+        linha_mensagem.addWidget(self.cancelar_distribuicao)
+        linha_carregamento.addLayout(linha_mensagem)
         self.progresso = QProgressBar()
         self.progresso.setRange(0, 0)
         self.progresso.setTextVisible(False)
@@ -950,7 +1097,8 @@ class JanelaPrincipal(QMainWindow):
             textos.setSpacing(2)
             legenda = self._rotulo(titulo)
             textos.addWidget(legenda)
-            numero = self._rotulo("—", "numeroCard")
+            tipo_numero = "numeroCardCapacidade" if titulo in {"Ocupação", "Ociosidade"} else "numeroCard"
+            numero = self._rotulo("—", tipo_numero)
             textos.addWidget(numero)
             detalhe = self._rotulo("")
             textos.addWidget(detalhe)
@@ -983,13 +1131,14 @@ class JanelaPrincipal(QMainWindow):
         for grafico, titulo, icone, legenda in zip(
             self.graficos, ("Alunos por turma", "Homens e mulheres por turma"),
             ("chart_ocupacao", "chart_genero"),
-            ("Azul: manhã · Turquesa: tarde · Alunos / capacidade", "Azul: homens · Turquesa: mulheres"),
+            (
+                ((AZUL, "Manhã"), (TURQUESA_ESCURO, "Tarde"), (FUNDO_AZUL, "Capacidade")),
+                ((AZUL, "Homens"), (TURQUESA, "Mulheres")),
+            ),
         ):
             painel, caixa = self._painel()
             self._titulo_painel(caixa, titulo, icone)
-            rotulo = self._rotulo(legenda, "legenda")
-            rotulo.setWordWrap(True)
-            caixa.addWidget(rotulo)
+            caixa.addWidget(criar_legenda_grafico(legenda))
             caixa.addWidget(self._rotulo("Turma", "eixo"))
             area = QScrollArea()
             area.setWidgetResizable(True)
@@ -1103,6 +1252,11 @@ class JanelaPrincipal(QMainWindow):
         self.filtro_disponibilidade.setEnabled(self.resultado is not None)
         self.turma_anterior.setEnabled(self.turma.currentIndex() > 0)
         self.turma_proxima.setEnabled(0 <= self.turma.currentIndex() < self.turma.count() - 1)
+        if hasattr(self, "cancelar_distribuicao"):
+            tarefa_cancelavel = self._tarefa is not None and self._tarefa.cancelavel
+            pode_cancelar = (self._ocupado and tarefa_cancelavel
+                             and not self._tarefa.cancelamento_solicitado)
+            self.cancelar_distribuicao.setEnabled(pode_cancelar)
         if hasattr(self, "botao_salvar_correcoes"):
             self._atualizar_estado_correcoes()
             for item in self.edicoes_inconsistencias:
@@ -1169,12 +1323,34 @@ class JanelaPrincipal(QMainWindow):
         self._ocupado = True
         self.carregamento.setVisible(distribuindo)
         self._atualizar_botoes()
-        self._tarefa = Tarefa(funcao, *args, parent=self)
+        cancelavel = distribuindo and funcao in (processar_planilha, processar_planilha_bytes)
+        self._tarefa = Tarefa(funcao, *args, cancelavel=cancelavel, parent=self)
+        self.cancelar_distribuicao.setVisible(cancelavel)
+        self.cancelar_distribuicao.setEnabled(cancelavel)
+        self.mensagem_carregamento.setText("Aguarde. A distribuição está sendo gerada.")
         if ao_concluir is not None:
             self._tarefa.concluida.connect(ao_concluir)
         self._tarefa.falhou.connect(ao_falhar or self._falhou)
+        self._tarefa.cancelada.connect(self._cancelamento_concluido)
         self._tarefa.finished.connect(self._finalizar_tarefa)
         self._tarefa.start()
+
+    def solicitar_cancelamento(self):
+        if self._tarefa is None or not self._tarefa.cancelavel:
+            return
+        self.cancelar_distribuicao.setEnabled(False)
+        self.mensagem_carregamento.setText("Interrompendo o cálculo… aguarde.")
+        self._tarefa.cancelar()
+
+    def _cancelamento_concluido(self):
+        self.carregamento.hide()
+        self.titulo_erro.setText("Geração cancelada")
+        self.orientacao_erro.setText(
+            "O cálculo foi interrompido. Nenhuma nova planilha de resultado foi exportada."
+        )
+        self.detalhe_erro.clear()
+        self.detalhe_erro.hide()
+        self.banner_erro.show()
 
     def gerar_distribuicao(self):
         if self.arquivo is not None and not self._ocupado:
@@ -1474,13 +1650,19 @@ class JanelaPrincipal(QMainWindow):
         resumo = metricas["resumo"]
         for rotulo, valor in zip(self.indicadores, (
             f"{resumo['alunos_alocados']} / {resumo['total_alunos']}", resumo["alunos_sem_turma"],
-            formatar_percentual(resumo["taxa_ocupacao"]), formatar_percentual(resumo["taxa_ociosidade"]),
+            f"{resumo['vagas_utilizadas']} / {resumo['capacidade_total']} vagas",
+            f"{resumo['vagas_ociosas']} vagas restantes",
         )):
             rotulo.setText(str(valor))
         self.detalhes_indicadores[0].setText(
             f"{formatar_percentual(resumo['percentual_alocados'])} dos alunos"
         )
-        self.detalhes_indicadores[3].setText(f"{resumo['vagas_ociosas']} vagas livres")
+        self.detalhes_indicadores[2].setText(
+            f"{formatar_percentual(resumo['taxa_ocupacao'])} da capacidade"
+        )
+        self.detalhes_indicadores[3].setText(
+            f"{formatar_percentual(resumo['taxa_ociosidade'])} da capacidade"
+        )
         turmas = metricas["turmas"]
         self.graficos[0].definir({t["nome"]: t["total_alunos"] for t in turmas},
                                  {t["nome"]: t["capacidade"] for t in turmas})
@@ -1604,6 +1786,8 @@ class JanelaPrincipal(QMainWindow):
     def _finalizar_tarefa(self):
         self._ocupado = False
         self.carregamento.hide()
+        self.cancelar_distribuicao.hide()
+        self.cancelar_distribuicao.setEnabled(False)
         self._tarefa.deleteLater()
         self._tarefa = None
         if self._revalidar_entrada_apos_falha and self.arquivo is not None:

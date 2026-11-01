@@ -1,6 +1,7 @@
 """Ensalamento UniSoma: modelo inteiro binário resolvido por PuLP/CBC."""
 from __future__ import annotations
 
+import multiprocessing
 import sys
 import unicodedata
 import os
@@ -320,6 +321,7 @@ def interface() -> None:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     if len(sys.argv) > 1:
         try:
             from ui.recursos import diretorio_aplicacao
