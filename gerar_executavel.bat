@@ -11,5 +11,5 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo Executavel gerado em dist\ABC_Aprendiz\ABC_Aprendiz.exe
-echo Distribua a pasta ABC_Aprendiz inteira, incluindo a pasta _internal.
+echo Executavel unico gerado em dist\ABC_Aprendiz.exe
+echo Este arquivo pode ser enviado sozinho para a ONG.

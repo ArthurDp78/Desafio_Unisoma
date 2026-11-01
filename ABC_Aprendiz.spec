@@ -1,4 +1,4 @@
-# Executável em pasta: evita extrair Qt e dependências a cada inicialização.
+# Executável único: inclui o aplicativo, o Qt, os recursos e o CBC do PuLP no .exe.
 from PyInstaller.utils.hooks import collect_data_files
 from pathlib import Path
 
@@ -22,6 +22,5 @@ a.binaries = [entrada for entrada in a.binaries
               if Path(entrada[0]).name.lower() != 'icuuc.dll'
               and not Path(entrada[0]).name.lower().startswith('icudt')]
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='ABC_Aprendiz',
+exe = EXE(pyz, a.scripts, a.binaries, a.datas, name='ABC_Aprendiz',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False)
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='ABC_Aprendiz')
