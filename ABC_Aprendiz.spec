@@ -1,6 +1,15 @@
 # Executável único: inclui o aplicativo, o Qt, os recursos e o CBC do PuLP no .exe.
 from PyInstaller.utils.hooks import collect_data_files
 from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+# Falhar antes do empacotamento se o HTML não puder ser convertido.
+# Processo separado: Playwright/Chromium são ferramentas apenas de build.
+manual = Path(SPECPATH) / 'Manual_do_Usuario_ABC_Aprendiz.pdf'
+subprocess.run([sys.executable, str(Path(SPECPATH) / 'gerar_manual.py'),
+                '--destino', str(manual)], check=True)
 
 a = Analysis(
     ['ensalamento.py'],
@@ -12,7 +21,8 @@ a = Analysis(
                    'PySide6.QtSvg', 'PySide6.QtSvgWidgets'],
     hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=['tkinter', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets',
-              'PySide6.QtQml', 'PySide6.QtQuick', 'matplotlib', 'IPython', 'pytest'],
+              'PySide6.QtQml', 'PySide6.QtQuick', 'matplotlib', 'IPython', 'pytest',
+              'playwright'],
     noarchive=False,
 )
 # O Qt para Windows usa a API ICU do próprio Windows. Uma ICU de outro
@@ -24,3 +34,5 @@ a.binaries = [entrada for entrada in a.binaries
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, name='ABC_Aprendiz',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False)
+# Manual externo: fica ao lado do executável, fora dos recursos extraídos em _MEIPASS.
+shutil.copy2(manual, Path(DISTPATH) / manual.name)

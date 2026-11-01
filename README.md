@@ -65,6 +65,7 @@ A execução pelo terminal com caminho explícito preserva a planilha de entrada
 ## Interface desktop
 
 - Importar XLSX, gerar a distribuição e exportar o workbook completo.
+- **Manual do usuário** no canto superior direito abre o PDF pronto no visualizador padrão do computador. Em janelas menores que 900 px, mostra apenas o ícone de livro, mantendo a tooltip **Abrir Manual do Usuário** e uma área de clique de pelo menos 40 × 40 px.
 - **Exportar relatório PDF** fica disponível ao lado de **Exportar XLSX** após gerar uma distribuição. O seletor sugere `outputs/pdf/<nome>_relatorio.pdf` e continua permitindo escolher outro destino. O relatório A4 inclui arquivo e identificação/data da execução, resumo geral, resumo por turno, indicadores de qualidade, gráficos completos e inconsistências/avisos separados. A seção final contém a lista completa de alunos por turma, com turno, alunos/capacidade, nome, sexo e disponibilidade, além dos alunos sem turma quando houver. Cabeçalhos de tabelas se repetem nas continuações e todas as páginas têm cabeçalho institucional e numeração. Os filtros da tela não restringem o PDF.
 - Falhas são exibidas dentro da aplicação, sem modal, em um banner de atenção abaixo do card superior. A mensagem principal orienta a verificar o formato da planilha e o detalhe preserva o motivo retornado pelo processamento. O banner é limpo ao carregar outro arquivo, iniciar uma nova tentativa ou receber um resultado válido; a validação original permanece inalterada.
 - Dashboard com quatro cards brancos: alunos alocados/total, alunos sem turma, ocupação e ociosidade. Os gráficos de alunos/capacidade e homens/mulheres têm maior altura, textos de alto contraste e eixos explícitos. A partir de 1200 px de largura, os gráficos e os painéis inferiores ficam lado a lado e os cards em uma linha. Abaixo disso, preserva-se o carrossel dos gráficos, os painéis inferiores ficam empilhados e os cards usam duas colunas. Clicar numa linha do gráfico seleciona a turma correspondente.
@@ -119,7 +120,7 @@ python -m pip install -r requirements.txt
 python ensalamento.py
 ```
 
-Também é possível abrir `executar.bat`. Ele prioriza o executável em `dist/ABC_Aprendiz/`; se ainda não tiver sido gerado, usa o ambiente local `.venv-ui` ou um Python com as dependências instaladas.
+Também é possível abrir `executar.bat`. Ele prioriza o executável em `dist/ABC_Aprendiz.exe`; se ainda não tiver sido gerado, usa o ambiente local `.venv-ui` ou um Python com as dependências instaladas.
 
 Na janela, use **Importar XLSX**, **Gerar distribuição** e **Exportar XLSX**. A distribuição não é despejada no terminal.
 
@@ -135,14 +136,50 @@ Para preparar o empacotamento com Python 3.12.9:
 
 ```powershell
 python -m pip install -r requirements-dev.txt
+python -m playwright install chromium --only-shell
 python -m PyInstaller --noconfirm ABC_Aprendiz.spec
 ```
 
-Ou execute `gerar_executavel.bat` após instalar as dependências de desenvolvimento. O resultado fica em **`dist/ABC_Aprendiz/ABC_Aprendiz.exe`**. Distribua a pasta **ABC_Aprendiz inteira**, incluindo `_internal`: o computador de destino não precisa de Python. O empacotamento em pasta evita extrair todas as bibliotecas a cada abertura; não mova apenas o `.exe`.
+Ou execute `gerar_executavel.bat` após instalar as dependências de desenvolvimento. O script prepara o Chromium de build (reutiliza a instalação quando já disponível) e executa o PyInstaller, priorizando `.venv-ui`, depois `.venv` e, por fim, `py -3.12`. O resultado é:
+
+```text
+dist/
+├── ABC_Aprendiz.exe
+└── Manual_do_Usuario_ABC_Aprendiz.pdf
+```
+
+Distribua **os dois arquivos juntos, na mesma pasta**: o computador de destino não precisa de Python nem de ferramentas para gerar o manual. O executável único inclui suas bibliotecas e prepara os componentes em uma pasta temporária durante a abertura; não há pasta `_internal` para distribuir. O PDF permanece externo para ser encontrado facilmente e aberto pelo visualizador padrão.
 
 O `.spec` inclui o solver CBC do PuLP e exclui os módulos de navegador e QML, que a interface não utiliza. A pasta `dist/` é um artefato local e não é versionada. O executável é uma build de desenvolvimento sem assinatura digital.
 
 No Windows, o pacote também exclui cópias de ICU encontradas no `PATH` de outras ferramentas, deixando o Qt usar a API ICU do próprio Windows. Uma cópia incompatível dessa DLL impede a importação de `QtCore`, mesmo quando o processamento por terminal funciona.
+
+### Preparação e abertura do Manual do Usuário
+
+`manual_usuario.html` é o fonte editável. No início de cada build, antes de `Analysis`, o `.spec` executa `gerar_manual.py` com o mesmo Python do PyInstaller. O gerador usa [Playwright e a impressão em PDF do Chromium](https://playwright.dev/python/docs/api/class-page#page-pdf), aplica o CSS de impressão/A4 do HTML, preserva fundos e espera fontes e imagens carregarem. A conversão é local; apenas a instalação inicial das ferramentas exige download. Se a conversão falhar, o build para, impedindo uma entrega com manual ausente ou desatualizado.
+
+O PDF gerado fica na raiz do projeto. Ao terminar `EXE`, o `.spec` copia esse PDF para `dist/`, ao lado do executável, respeitando também `--distpath`. Ele não entra em `datas`, pois isso o incorporaria ao executável e o extrairia na pasta temporária em vez de deixá-lo ao lado do `.exe`. O HTML, o gerador, o Playwright e o Chromium não são incluídos na aplicação. O PDF da raiz, `build/` e `dist/` são artefatos locais ignorados pelo Git.
+
+Para preparar somente o manual em desenvolvimento, depois de instalar as ferramentas acima:
+
+```powershell
+python gerar_manual.py
+python ensalamento.py
+```
+
+Faça essa preparação ao atualizar o HTML. O programa nunca gera o manual na inicialização ou no clique. Opcionalmente, o gerador aceita `--html caminho.html` e `--destino caminho.pdf`.
+
+`ui/recursos.py:caminho_manual()` usa a raiz do projeto em desenvolvimento e `Path(sys.executable).resolve().parent` quando `sys.frozen` está ativo. A busca independe da pasta de trabalho e não usa `_MEIPASS` para o manual. No Windows, o botão chama `os.startfile` para abrir o próprio PDF no aplicativo associado; em outros sistemas, usa `QDesktopServices.openUrl`. Nenhuma cópia nem seletor de destino é criado.
+
+Teste em desenvolvimento e depois no executável Windows:
+
+1. Prepare o PDF, abra a interface e clique em **Manual do usuário**. Confirme a abertura do PDF no visualizador padrão. Abra também o programa a partir de outra pasta de trabalho.
+2. Redimensione a janela para 680, 899, 900 e 1280 px de largura. Confirme o cabeçalho, o modo apenas ícone abaixo de 900 px, a tooltip e a abertura pelo mesmo botão.
+3. Renomeie temporariamente o PDF e clique. Deve aparecer **Manual não encontrado** com “O Manual do Usuário não foi encontrado na pasta do sistema.” Restaure o nome em seguida.
+4. Em um ambiente Windows de teste sem associação funcional para PDF, clique com o arquivo presente. Deve aparecer **Não foi possível abrir o manual** com “Verifique se existe um programa instalado no computador capaz de abrir arquivos PDF.” Os testes automatizados também simulam essa falha sem alterar associações do computador.
+5. Execute `gerar_executavel.bat`, confira a estrutura acima e copie o `.exe` e o PDF juntos para outra localização ou um Windows sem Python. Abra o `.exe` e repita os passos anteriores. Confirme que cliques e reinicializações não alteram a data de modificação do manual.
+
+O executável Windows deve ser gerado e validado no Windows; o teste em Linux não substitui essa verificação.
 
 ## Testes
 
@@ -171,6 +208,8 @@ apresentacao.py
 metricas.py
 dados.py
 relatorio_pdf.py
+manual_usuario.html
+gerar_manual.py
 ui/
   interface_desktop.py
   tema.py
@@ -186,6 +225,7 @@ requirements-dev.txt
 tests/
   test_desktop.py
   test_metricas.py
+  test_manual.py
 README.md
 ```
 
@@ -194,7 +234,7 @@ README.md
 - Validar os outputs com o programa oficial `Validador.exe`, especialmente os nomes exatos das abas/colunas e o formato do texto das inconsistências.
 - Ajustar o layout para qualquer template final atualizado pela organização.
 - Validar a distribuição do `.exe` em uma instalação Windows limpa e definir assinatura digital, se necessária para a entrega.
-- Criar o manual de usuário em PDF e o relatório resumo da distribuição, diferencial indicado nos documentos.
+- Conferir o manual final com as capturas de tela e preparar o relatório resumo da distribuição, diferencial indicado nos documentos.
 - Os cenários oficiais de desenvolvimento são quatro; a avaliação final executa 15 instâncias, das quais 11 não são fornecidas para desenvolvimento.
 
 ## Fontes do escopo

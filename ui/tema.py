@@ -91,6 +91,12 @@ QPushButton { background: $FUNDO_AZUL; border: 1px solid $BORDA; border-radius: 
               padding: 8px 14px; min-height: 20px; font-weight: 500; color: $AZUL; }
 QPushButton:hover { background: #E2E9F8; border-color: #A7B8DE; }
 QPushButton:pressed { background: #D7E1F6; }
+QToolButton#manualUsuario { background: transparent; color: $TEXTO_SECUNDARIO;
+                           border: 1px solid transparent; border-radius: 8px;
+                           padding: 6px; font-weight: 400; }
+QToolButton#manualUsuario:hover { background: $FUNDO_AZUL; border-color: $BORDA; }
+QToolButton#manualUsuario:pressed { background: #D7E1F6; }
+QToolButton#manualUsuario:focus { border-color: $AZUL; }
 QPushButton:disabled { color: #75829B; background: #F0F3F8; border-color: #E1E6EF; }
 QPushButton#primario { background: $AZUL; color: white; border-color: $AZUL; }
 QPushButton#primario:hover { background: #21397F; }

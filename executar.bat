@@ -1,8 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if exist "%~dp0dist\ABC_Aprendiz\ABC_Aprendiz.exe" (
-    start "ABC Aprendiz" "%~dp0dist\ABC_Aprendiz\ABC_Aprendiz.exe"
+if exist "%~dp0dist\ABC_Aprendiz.exe" (
+    start "ABC Aprendiz" "%~dp0dist\ABC_Aprendiz.exe"
     exit /b
 )
 if exist "%~dp0.venv-ui\Scripts\python.exe" (

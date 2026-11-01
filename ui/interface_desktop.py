@@ -11,13 +11,13 @@ import sys
 import tempfile
 import threading
 
-from PySide6.QtCore import QAbstractTableModel, QEasingCurve, QModelIndex, QPropertyAnimation, QPoint, QRect, QRectF, QSortFilterProxyModel, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtCore import QAbstractTableModel, QEasingCurve, QModelIndex, QPropertyAnimation, QPoint, QRect, QRectF, QSize, QSortFilterProxyModel, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLayout,
-    QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QPushButton,
-    QScrollArea, QSizePolicy, QStackedWidget, QTableView, QVBoxLayout, QWidget,
+    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QScrollArea, QSizePolicy, QStackedWidget, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
 from apresentacao import (
@@ -28,7 +28,7 @@ from apresentacao import (
     texto_busca, texto_diferenca_turmas, texto_variacao_genero,
 )
 
-from .recursos import caminho_recurso, diretorio_aplicacao
+from .recursos import caminho_manual, caminho_recurso, diretorio_aplicacao
 from relatorio_pdf import IdentificacaoExecucao, exportar_relatorio_pdf
 from .tema import (
     AZUL, TURQUESA, TURQUESA_ESCURO, TEXTO, TEXTO_SECUNDARIO,
@@ -695,8 +695,35 @@ class JanelaPrincipal(QMainWindow):
 
     def resizeEvent(self, evento):
         super().resizeEvent(evento)
+        if hasattr(self, "manual"):
+            self._atualizar_botao_manual()
         if hasattr(self, "grade_resumos"):
             self._atualizar_modo_dashboard()
+
+    def _atualizar_botao_manual(self):
+        self.manual.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonIconOnly if self.width() < 900
+            else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+
+    def abrir_manual(self):
+        try:
+            manual = caminho_manual()
+            if not manual.is_file():
+                QMessageBox.warning(
+                    self, "Manual não encontrado",
+                    "O Manual do Usuário não foi encontrado na pasta do sistema.",
+                )
+                return
+            if sys.platform == "win32":
+                os.startfile(str(manual))
+            elif not QDesktopServices.openUrl(QUrl.fromLocalFile(str(manual))):
+                raise OSError("Nenhum visualizador disponível")
+        except (OSError, RuntimeError):
+            QMessageBox.warning(
+                self, "Não foi possível abrir o manual",
+                "Verifique se existe um programa instalado no computador capaz de abrir arquivos PDF.",
+            )
 
     def _atualizar_modo_dashboard(self):
         self._organizar_acoes_arquivo()
@@ -819,6 +846,18 @@ class JanelaPrincipal(QMainWindow):
         cabecalho.addWidget(logo)
         cabecalho.addStretch()
         cabecalho.addWidget(self._rotulo("Sistema de Ensalamento", "titulo"))
+        self.manual = QToolButton()
+        self.manual.setObjectName("manualUsuario")
+        self.manual.setText("Manual do usuário")
+        self.manual.setIcon(QIcon(str(caminho_recurso("assets", "icons", "manual.svg"))))
+        self.manual.setIconSize(QSize(ICONE, ICONE))
+        self.manual.setMinimumSize(40, 40)
+        self.manual.setToolTip("Abrir Manual do Usuário")
+        self.manual.setAccessibleName("Manual do usuário")
+        self.manual.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.manual.clicked.connect(self.abrir_manual)
+        self._atualizar_botao_manual()
+        cabecalho.addWidget(self.manual)
         principal.addLayout(cabecalho)
         arquivo, linha_arquivo = self._painel()
         self.acoes_arquivo = QGridLayout()
