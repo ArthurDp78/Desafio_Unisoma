@@ -9,14 +9,16 @@ from PySide6.QtCore import QAbstractTableModel, QEasingCurve, QModelIndex, QProp
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLayout,
+    QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLayout,
     QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea, QSizePolicy, QStackedWidget, QTableView, QVBoxLayout, QWidget,
 )
 
 from apresentacao import (
     ResultadoInterface, exportar_planilha, formatar_percentual, processar_planilha,
-    nome_turma_visual, relatorios_interface, separar_ocorrencias,
+    inconsistencias_editaveis, detalhes_registros_por_linha, revalidar_correcoes,
+    processar_planilha_bytes, categoria, relatorio_ocorrencias,
+    nome_turma_visual, separar_ocorrencias,
     texto_busca, texto_diferenca_turmas, texto_variacao_genero,
 )
 
@@ -531,6 +533,10 @@ class JanelaPrincipal(QMainWindow):
         self.exportador_pdf = exportar_relatorio_pdf
         self.arquivo = None
         self.resultado = None
+        self.planilha_trabalho = None
+        self.registros_ocorrencias = []
+        self.alunos_validos = 0
+        self._revalidar_entrada_apos_falha = False
         self.execucao_relatorio = None
         self.modo_acoes_arquivo = None
         self._tarefa = None
@@ -816,6 +822,10 @@ class JanelaPrincipal(QMainWindow):
         self.contagem = self._rotulo("Sem distribuição.")
         layout_alunos.addWidget(self.contagem)
         self.secoes.addWidget(alunos)
+        self.pagina_ocorrencias = QWidget()
+        layout_pagina_ocorrencias = QVBoxLayout(self.pagina_ocorrencias)
+        layout_pagina_ocorrencias.setContentsMargins(0, 0, 0, 0)
+        layout_pagina_ocorrencias.setSpacing(10)
         self.ocorrencias = QScrollArea()
         self.ocorrencias.setWidgetResizable(True)
         self.ocorrencias.setFrameShape(QFrame.Shape.NoFrame)
@@ -828,6 +838,8 @@ class JanelaPrincipal(QMainWindow):
         layout_ocorrencias.setSpacing(ESPACO_SECOES)
         self.contadores_ocorrencias = []
         self.paineis_ocorrencias = []
+        self.edicoes_inconsistencias = []
+        self.edicoes_duplicidades = []
         editores = []
         for titulo, icone, descricao in (
             ("Inconsistências", "tab_inconsistencias",
@@ -848,18 +860,54 @@ class JanelaPrincipal(QMainWindow):
             explicacao = self._rotulo(descricao)
             explicacao.setWordWrap(True)
             caixa.addWidget(explicacao)
+            if titulo == "Inconsistências":
+                self.formulario_inconsistencias = QWidget()
+                self.formulario_inconsistencias_layout = QVBoxLayout(self.formulario_inconsistencias)
+                self.formulario_inconsistencias_layout.setContentsMargins(0, 4, 0, 0)
+                self.formulario_inconsistencias_layout.setSpacing(8)
+                caixa.addWidget(self.formulario_inconsistencias)
+                acoes_correcao = QHBoxLayout()
+                acoes_correcao.setSpacing(8)
+                self.botao_salvar_correcoes = QPushButton("Salvar alterações")
+                self.botao_salvar_correcoes.setObjectName("exportar")
+                self.botao_salvar_correcoes.setToolTip(
+                    "Aplicar as correções e exclusões selecionadas, depois revalidar sem executar o solver."
+                )
+                self.botao_salvar_correcoes.setEnabled(False)
+                self.botao_salvar_correcoes.clicked.connect(self.salvar_correcoes)
+                self.gerar_validos = QPushButton("Gerar distribuição com novos registros válidos")
+                self.gerar_validos.setObjectName("primario")
+                self.gerar_validos.setEnabled(False)
+                self.gerar_validos.clicked.connect(self.gerar_com_registros_validos)
+            else:
+                self.formulario_avisos = QWidget()
+                self.formulario_avisos_layout = QVBoxLayout(self.formulario_avisos)
+                self.formulario_avisos_layout.setContentsMargins(0, 4, 0, 0)
+                self.formulario_avisos_layout.setSpacing(8)
+                caixa.addWidget(self.formulario_avisos)
             editor = RelatorioOcorrencias()
             editor.setProperty("vazio", True)
             editor.setAccessibleName(f"Relatório agrupado de {titulo.lower()}")
             editor.setPlainText("Nenhuma instância avaliada.")
             caixa.addWidget(editor)
+            if titulo in {"Inconsistências", "Avisos"}:
+                editor.hide()
             editores.append(editor)
             self.paineis_ocorrencias.append(painel)
             layout_ocorrencias.addWidget(painel)
         layout_ocorrencias.addStretch(1)
         self.ocorrencias.setWidget(conteudo_ocorrencias)
+        layout_pagina_ocorrencias.addWidget(self.ocorrencias, 1)
+        barra_acoes = QFrame()
+        barra_acoes.setObjectName("painel")
+        acoes_correcao.setContentsMargins(12, 8, 12, 8)
+        acoes_correcao.addWidget(self.botao_salvar_correcoes)
+        acoes_correcao.addSpacing(8)
+        acoes_correcao.addWidget(self.gerar_validos)
+        barra_acoes.setLayout(acoes_correcao)
+        layout_pagina_ocorrencias.addWidget(barra_acoes)
         self.relatorio, self.avisos = editores
-        self.secoes.addWidget(self.ocorrencias)
+        self.secoes.addWidget(self.pagina_ocorrencias)
         # O tamanho preferido dos editores não deve forçar rolagem da janela inteira.
         # A área principal cresce com a janela e cada conteúdo preserva seu mínimo legível.
         self.secoes.setMinimumHeight(self.secoes.minimumSizeHint().height())
@@ -1045,7 +1093,8 @@ class JanelaPrincipal(QMainWindow):
 
     def _atualizar_botoes(self):
         self.importar.setEnabled(not self._ocupado)
-        self.gerar.setEnabled(self.arquivo is not None and not self._ocupado)
+        pode_gerar = self.arquivo is not None and (self.planilha_trabalho is None or self.alunos_validos > 0)
+        self.gerar.setEnabled(pode_gerar and not self._ocupado)
         self.exportar.setEnabled(self.resultado is not None and not self._ocupado)
         self.exportar_pdf.setEnabled(self.resultado is not None and not self._ocupado)
         self.turma.setEnabled(self.resultado is not None)
@@ -1054,6 +1103,14 @@ class JanelaPrincipal(QMainWindow):
         self.filtro_disponibilidade.setEnabled(self.resultado is not None)
         self.turma_anterior.setEnabled(self.turma.currentIndex() > 0)
         self.turma_proxima.setEnabled(0 <= self.turma.currentIndex() < self.turma.count() - 1)
+        if hasattr(self, "botao_salvar_correcoes"):
+            self._atualizar_estado_correcoes()
+            for item in self.edicoes_inconsistencias:
+                for controle in item["campos"].values():
+                    controle.setEnabled(not self._ocupado)
+            for item in self.edicoes_duplicidades:
+                item["seletor"].setEnabled(not self._ocupado)
+                item["confirmar"].setEnabled(not self._ocupado)
 
     def escolher_arquivo(self):
         nome, _ = QFileDialog.getOpenFileName(self, "Importar planilha", "", "Planilha Excel (*.xlsx)")
@@ -1066,6 +1123,10 @@ class JanelaPrincipal(QMainWindow):
         self._limpar_erro()
         self.arquivo = Path(arquivo)
         self.resultado = None
+        self.planilha_trabalho = None
+        self.registros_ocorrencias = []
+        self.alunos_validos = 0
+        self._revalidar_entrada_apos_falha = False
         self.execucao_relatorio = None
         self.nome_arquivo.setText(self.arquivo.name)
         self.nome_arquivo.setToolTip(str(self.arquivo))
@@ -1095,6 +1156,8 @@ class JanelaPrincipal(QMainWindow):
         self.dashboard.verticalScrollBar().setValue(0)
         self.relatorio.setPlainText("Nenhuma distribuição realizada para esta planilha.")
         self.avisos.setPlainText("Nenhuma distribuição realizada para esta planilha.")
+        self._limpar_formulario_inconsistencias()
+        self._limpar_formulario_avisos()
         self._atualizar_ocorrencias()
         self.contagem.setText("Sem distribuição.")
         self._atualizar_botoes()
@@ -1115,13 +1178,29 @@ class JanelaPrincipal(QMainWindow):
 
     def gerar_distribuicao(self):
         if self.arquivo is not None and not self._ocupado:
-            self.definir_arquivo(self.arquivo)
-            self._iniciar_tarefa(self.processador, (self.arquivo,), self.mostrar_resultado, distribuindo=True)
+            if self.planilha_trabalho is not None:
+                self._iniciar_tarefa(
+                    processar_planilha_bytes, (self.arquivo, self.planilha_trabalho),
+                    self.mostrar_resultado, distribuindo=True,
+                )
+            else:
+                self.definir_arquivo(self.arquivo)
+                self._iniciar_tarefa(self.processador, (self.arquivo,), self.mostrar_resultado, distribuindo=True)
+
+    def gerar_com_registros_validos(self):
+        if self.arquivo is not None and self.planilha_trabalho is not None and self.alunos_validos and not self._ocupado:
+            self._iniciar_tarefa(
+                processar_planilha_bytes, (self.arquivo, self.planilha_trabalho),
+                self.mostrar_resultado, distribuindo=True,
+            )
 
     def mostrar_resultado(self, resultado: ResultadoInterface):
         self._limpar_erro()
         self.carregamento.hide()
         self.resultado = resultado
+        self.planilha_trabalho = resultado.planilha
+        self.registros_ocorrencias = list(resultado.inconsistencias)
+        self.alunos_validos = resultado.metricas["resumo"]["total_alunos"]
         self.execucao_relatorio = IdentificacaoExecucao()
         self._mostrar_dashboard(resultado.metricas)
         self.turma.blockSignals(True)
@@ -1129,10 +1208,255 @@ class JanelaPrincipal(QMainWindow):
         self.turma.addItems(list(resultado.grupos))
         self.turma.blockSignals(False)
         self.mostrar_turma(self.turma.currentText())
-        inconsistencias, avisos = relatorios_interface(resultado)
-        self.relatorio.setPlainText(inconsistencias)
-        self.avisos.setPlainText(avisos)
-        self._atualizar_ocorrencias(*map(len, separar_ocorrencias(resultado)))
+        self._atualizar_textos_ocorrencias()
+        self._mostrar_formulario_inconsistencias()
+        self._mostrar_formulario_avisos()
+        self._atualizar_ocorrencias(*self._contagens_ocorrencias())
+        self._atualizar_botoes()
+
+    def _limpar_formulario_inconsistencias(self):
+        while self.formulario_inconsistencias_layout.count():
+            item = self.formulario_inconsistencias_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.edicoes_inconsistencias.clear()
+        self.botao_salvar_correcoes.show()
+        self.botao_salvar_correcoes.setEnabled(False)
+
+    def _limpar_formulario_avisos(self):
+        while self.formulario_avisos_layout.count():
+            item = self.formulario_avisos_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.edicoes_duplicidades.clear()
+
+    def _registros_separados(self):
+        avisos, inconsistencias = [], []
+        for registro in self.registros_ocorrencias:
+            (avisos if categoria(registro["Motivo"]) in {"Nomes duplicados", "Dados normalizados"}
+             else inconsistencias).append(registro)
+        return inconsistencias, avisos
+
+    def _contagens_ocorrencias(self):
+        inconsistencias, avisos = self._registros_separados()
+        return len(inconsistencias), len(avisos)
+
+    def _atualizar_textos_ocorrencias(self):
+        inconsistencias, avisos = self._registros_separados()
+        self.relatorio.setPlainText(relatorio_ocorrencias(inconsistencias, "Nenhuma inconsistência encontrada."))
+        self.avisos.setPlainText(relatorio_ocorrencias(avisos, "Nenhum aviso gerado."))
+
+    def _mostrar_formulario_inconsistencias(self):
+        self._limpar_formulario_inconsistencias()
+        if self.planilha_trabalho is None:
+            return
+        inconsistencias, _ = self._registros_separados()
+        descritores = inconsistencias_editaveis(self.planilha_trabalho, inconsistencias)
+        for descritor in descritores:
+            registro = descritor["registro"]
+            quadro = QFrame()
+            quadro.setObjectName("editorInconsistencia")
+            layout = QVBoxLayout(quadro)
+            layout.setContentsMargins(12, 10, 12, 10)
+            layout.setSpacing(6)
+            titulo = self._rotulo(f"{registro['Nome']} · Linha {descritor['linha']}", "subtitulo")
+            titulo.setWordWrap(True)
+            layout.addWidget(titulo)
+            problema = self._rotulo(registro["Motivo"])
+            problema.setWordWrap(True)
+            layout.addWidget(problema)
+            campos_widgets = {}
+            if descritor["campos"]:
+                for campo in descritor["campos"]:
+                    linha_campo = QHBoxLayout()
+                    linha_campo.setSpacing(10)
+                    rotulos = QVBoxLayout()
+                    rotulos.setSpacing(2)
+                    rotulos.addWidget(self._rotulo(campo["campo"], "subtitulo"))
+                    atual = campo["atual"]
+                    texto_atual = "(vazio)" if atual is None or not str(atual).strip() else str(atual)
+                    valor_atual = self._rotulo(
+                        f"Problema: {campo['problema']} · Valor atual: {texto_atual}"
+                    )
+                    valor_atual.setWordWrap(True)
+                    rotulos.addWidget(valor_atual)
+                    linha_campo.addLayout(rotulos, 1)
+                    if campo["campo"] == "Nome":
+                        controle = QLineEdit()
+                        controle.setPlaceholderText("Nome do aluno")
+                        controle.textChanged.connect(self._atualizar_estado_correcoes)
+                    else:
+                        controle = QComboBox()
+                        controle.addItem("Selecione…", None)
+                        if campo["campo"] == "Sexo":
+                            controle.addItem("Feminino", "F")
+                            controle.addItem("Masculino", "M")
+                        else:
+                            controle.addItem("Manhã", "Manhã")
+                            controle.addItem("Tarde", "Tarde")
+                        controle.currentIndexChanged.connect(self._atualizar_estado_correcoes)
+                    controle.setMinimumWidth(185)
+                    linha_campo.addWidget(controle)
+                    layout.addLayout(linha_campo)
+                    campos_widgets[campo["campo"]] = controle
+            else:
+                atuais = descritor["atuais"]
+                texto_atual = " · ".join(
+                    f"{campo}: {'(vazio)' if valor is None or not str(valor).strip() else valor}"
+                    for campo, valor in atuais.items()
+                )
+                contexto = self._rotulo(f"Valores atuais: {texto_atual}")
+                contexto.setWordWrap(True)
+                layout.addWidget(contexto)
+            self.formulario_inconsistencias_layout.addWidget(quadro)
+            self.edicoes_inconsistencias.append({"linha": descritor["linha"], "campos": campos_widgets})
+        self.botao_salvar_correcoes.show()
+        self._atualizar_estado_correcoes()
+
+    def _atualizar_estado_correcoes(self, *_):
+        alguma = False
+        for item in self.edicoes_inconsistencias:
+            valores = {}
+            for campo, controle in item["campos"].items():
+                if campo == "Nome":
+                    valor = controle.text().strip()
+                else:
+                    valor = controle.currentData()
+                if valor is not None and (campo != "Nome" or valor):
+                    valores[campo] = valor
+            alguma = alguma or bool(valores)
+        alguma = alguma or any(
+            item["seletor"].currentData() is not None and item["confirmar"].isChecked()
+            for item in self.edicoes_duplicidades
+        )
+        self.botao_salvar_correcoes.setEnabled(alguma and not self._ocupado)
+        if hasattr(self, "gerar_validos"):
+            self.gerar_validos.setVisible(True)
+            self.gerar_validos.setEnabled(bool(self.planilha_trabalho and self.alunos_validos) and not self._ocupado)
+
+    def salvar_correcoes(self):
+        if self.planilha_trabalho is None or self._ocupado:
+            return
+        correcoes = []
+        for item in self.edicoes_inconsistencias:
+            valores = {}
+            for campo, controle in item["campos"].items():
+                valor = controle.text().strip() if campo == "Nome" else controle.currentData()
+                if valor is not None and (campo != "Nome" or valor):
+                    valores[campo] = valor
+            if valores:
+                correcoes.append({"linha": item["linha"], "valores": valores})
+        exclusoes = [
+            int(item["seletor"].currentData()) for item in self.edicoes_duplicidades
+            if item["seletor"].currentData() is not None and item["confirmar"].isChecked()
+        ]
+        if correcoes or exclusoes:
+            self._iniciar_tarefa(
+                revalidar_correcoes, (self.planilha_trabalho, correcoes, exclusoes),
+                self._revalidacao_concluida,
+            )
+
+    def _mostrar_formulario_avisos(self):
+        self._limpar_formulario_avisos()
+        if self.planilha_trabalho is None:
+            return
+        _, avisos = self._registros_separados()
+        duplicidades = [registro for registro in avisos if categoria(registro["Motivo"]) == "Nomes duplicados"]
+        linhas_duplicadas = {}
+        for registro in duplicidades:
+            try:
+                linhas = [int(parte.strip()) for parte in str(registro["Linha"]).split(",")]
+            except ValueError:
+                continue
+            linhas_duplicadas.update(detalhes_registros_por_linha(self.planilha_trabalho, linhas))
+        for registro in avisos:
+            quadro = QFrame()
+            quadro.setObjectName("editorInconsistencia")
+            layout = QVBoxLayout(quadro)
+            layout.setContentsMargins(12, 10, 12, 10)
+            layout.setSpacing(6)
+            titulo = "Possível nome duplicado" if categoria(registro["Motivo"]) == "Nomes duplicados" else str(registro["Nome"])
+            rotulo = self._rotulo(titulo, "subtitulo")
+            layout.addWidget(rotulo)
+            motivo = self._rotulo(registro["Motivo"])
+            motivo.setWordWrap(True)
+            layout.addWidget(motivo)
+            if categoria(registro["Motivo"]) == "Nomes duplicados":
+                linhas = [int(parte.strip()) for parte in str(registro["Linha"]).split(",")
+                          if parte.strip().isdigit()]
+                resumo = self._rotulo(
+                    "Pode ser um erro de cadastro ou um homônimo. Nomes iguais são considerados pessoas distintas por padrão. "
+                    "Revise os dados antes de excluir uma linha."
+                )
+                resumo.setWordWrap(True)
+                layout.addWidget(resumo)
+                seletor = QComboBox()
+                seletor.addItem("Selecione o registro a excluir…", None)
+                for linha in linhas:
+                    nome = linhas_duplicadas.get(linha, {}).get("Nome") or "(sem nome)"
+                    seletor.addItem(f"Linha {linha} · {nome}", linha)
+                layout.addWidget(seletor)
+                confirmar = QCheckBox("Confirmo que é duplicidade real e desejo excluir esta linha.")
+                confirmar.setObjectName("confirmarDuplicidade")
+                confirmar.setMinimumHeight(42)
+                confirmar.setToolTip("A linha selecionada será excluída ao salvar as correções.")
+                layout.addWidget(confirmar)
+                confirmar.hide()
+                seletor.currentIndexChanged.connect(
+                    lambda *_args, combo=seletor, check=confirmar:
+                    self._selecionar_linha_duplicada(combo, check)
+                )
+                confirmar.toggled.connect(self._atualizar_estado_correcoes)
+                aplicacao = self._rotulo("A decisão será aplicada ao clicar em “Salvar correções”.")
+                aplicacao.setWordWrap(True)
+                layout.addWidget(aplicacao)
+                aplicacao.hide()
+                seletor.currentIndexChanged.connect(
+                    lambda *_args, combo=seletor, aviso=aplicacao:
+                    aviso.setVisible(combo.currentData() is not None)
+                )
+                self.edicoes_duplicidades.append({"linhas": linhas, "seletor": seletor,
+                                                  "confirmar": confirmar})
+            else:
+                linha = self._rotulo(f"Aba Alunos · Linha(s) {registro['Linha']}")
+                layout.addWidget(linha)
+            self.formulario_avisos_layout.addWidget(quadro)
+
+    def _selecionar_linha_duplicada(self, seletor, confirmar):
+        confirmar.setChecked(False)
+        confirmar.setVisible(seletor.currentData() is not None)
+        self._atualizar_estado_correcoes()
+
+    def _revalidacao_concluida(self, resultado):
+        self.planilha_trabalho = resultado.planilha
+        self.registros_ocorrencias = list(resultado.inconsistencias)
+        self.alunos_validos = resultado.alunos_validos
+        self.resultado = None
+        self.execucao_relatorio = None
+        for indicador in self.indicadores:
+            indicador.setText("—")
+        for detalhe in self.detalhes_indicadores:
+            detalhe.clear()
+        for grafico in self.graficos:
+            grafico.definir({})
+        for rotulo in self.diferencas_turmas.values():
+            rotulo.setText("—")
+        self.variacao_genero.setText("—")
+        self.turmas_variacao_genero.clear()
+        self.turmas_variacao_genero.hide()
+        self.contexto_variacao.hide()
+        for valores in self.resumo_turnos.values():
+            for rotulo in valores.values():
+                rotulo.setText("—")
+        self.turma.clear()
+        self.modelo.definir([])
+        self.contagem.setText(f"{self.alunos_validos} registros válidos; distribuição ainda não gerada.")
+        self._atualizar_textos_ocorrencias()
+        self._mostrar_formulario_inconsistencias()
+        self._mostrar_formulario_avisos()
+        self._atualizar_ocorrencias(*self._contagens_ocorrencias())
         self._atualizar_botoes()
 
     def _atualizar_ocorrencias(self, inconsistencias=0, avisos=0):
@@ -1259,6 +1583,10 @@ class JanelaPrincipal(QMainWindow):
 
     def _falhou(self, mensagem):
         self.carregamento.hide()
+        if (self.arquivo is not None and self.planilha_trabalho is None
+                and mensagem == "Não há alunos com nome, sexo e disponibilidade válidos."):
+            self._revalidar_entrada_apos_falha = True
+            return
         detalhe = mensagem or ""
         self.detalhe_erro.setText(detalhe)
         self.detalhe_erro.setVisible(bool(detalhe.strip()))
@@ -1276,6 +1604,17 @@ class JanelaPrincipal(QMainWindow):
         self.carregamento.hide()
         self._tarefa.deleteLater()
         self._tarefa = None
+        if self._revalidar_entrada_apos_falha and self.arquivo is not None:
+            self._revalidar_entrada_apos_falha = False
+            try:
+                entrada = self.arquivo.read_bytes()
+            except OSError as erro:
+                self._falhou(str(erro))
+            else:
+                self._iniciar_tarefa(
+                    revalidar_correcoes, (entrada, [], []), self._revalidacao_concluida,
+                )
+                return
         self._atualizar_botoes()
 
     def closeEvent(self, evento):

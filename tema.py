@@ -44,6 +44,7 @@ ALTURA_GRAFICO_MAXIMA = 560
 AJUSTE_MAXIMO_GRAFICOS = 32
 ALTURA_EIXO = 66
 CHEVRON_DROPDOWN = caminho_recurso("assets", "icons", "chevron_down.svg").as_posix()
+CHECKMARK_TEXTO = caminho_recurso("assets", "icons", "check_text.svg").as_posix()
 
 
 def fonte_interface(tamanho=FONTE_BASE, peso=QFont.Weight.Normal):
@@ -59,6 +60,7 @@ QMainWindow, QWidget#central { background: $FUNDO; color: $TEXTO; }
 QWidget { font-family: $FAMILIAS_QSS; font-size: ${FONTE_BASE}px; font-weight: 400; color: $TEXTO; }
 QFrame#painel, QFrame#cardResumo { background: $BRANCO; border: 1px solid $BORDA; border-radius: ${RAIO}px; }
 QFrame#bannerErro { background: $FUNDO_ALERTA; border: 1px solid $BORDA_ALERTA; border-radius: ${RAIO}px; }
+QFrame#editorInconsistencia { background: white; border: 1px solid $BORDA; border-radius: ${RAIO_INTERNO}px; }
 QFrame#quadroQualidade { background: $FUNDO; border: 1px solid $BORDA; border-radius: ${RAIO_INTERNO}px; }
 QFrame#iconeCard { background: $FUNDO_AZUL; border: none; border-radius: 11px; }
 QFrame#iconeCard[tipo="positivo"] { background: $FUNDO_VERDE; }
@@ -99,6 +101,14 @@ QPushButton#navegacaoBotao { background: transparent; border: none; border-radiu
 QLabel#textoNavegacao { color: $TEXTO_SECUNDARIO; font-size: 14px; font-weight: 400; }
 QLabel#textoNavegacao[ativa="true"] { color: $AZUL; font-weight: 500; }
 QPushButton:focus, QLineEdit:focus, QComboBox:focus { border-color: $AZUL; }
+QCheckBox#confirmarDuplicidade { spacing: 10px; padding: 8px 10px; background: $FUNDO_ALERTA;
+                                border: 1px solid $BORDA_ALERTA; border-radius: 8px; color: $TEXTO;
+                                font-weight: 500; }
+QCheckBox#confirmarDuplicidade::indicator { width: 22px; height: 22px; background: white;
+                                           border: 2px solid $ALERTA; border-radius: 5px; }
+QCheckBox#confirmarDuplicidade::indicator:checked { image: url("$CHECKMARK_TEXTO");
+                                                    background: white; border-color: $TEXTO; }
+QCheckBox#confirmarDuplicidade:disabled { color: $TEXTO_SECUNDARIO; background: #F5F6F8; }
 QLineEdit, QComboBox { background: white; border: 1px solid $BORDA; border-radius: 8px;
                      padding: 7px 10px; min-height: 20px; }
 QComboBox::drop-down { border: none; width: 24px; }

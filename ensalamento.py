@@ -91,7 +91,7 @@ def ler_estrutura(xls: pd.ExcelFile) -> dict[str, dict[str, int]]:
     return estrutura
 
 
-def ler_alunos(xls: pd.ExcelFile) -> tuple[list[Aluno], list[dict]]:
+def ler_alunos(xls: pd.ExcelFile, *, permitir_sem_alunos: bool = False) -> tuple[list[Aluno], list[dict]]:
     if ABAS["alunos"] not in xls.sheet_names:
         raise ValueError("O arquivo precisa conter a aba 'Alunos'.")
     tabela = xls.parse(ABAS["alunos"])
@@ -131,7 +131,7 @@ def ler_alunos(xls: pd.ExcelFile) -> tuple[list[Aluno], list[dict]]:
             nome = next(a.nome for a in alunos if a.linha == linhas[0])
             inconsistencias.append({"Linha": ", ".join(map(str, linhas)), "Nome": nome,
                                     "Motivo": "Nome duplicado no cadastro. Pode ser homônimo; todos os registros foram mantidos como alunos distintos."})
-    if not alunos:
+    if not alunos and not permitir_sem_alunos:
         raise ValueError("Não há alunos com nome, sexo e disponibilidade válidos.")
     return alunos, inconsistencias
 
