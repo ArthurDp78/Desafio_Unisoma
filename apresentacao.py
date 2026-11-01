@@ -38,6 +38,43 @@ def texto_variacao_genero(variacao: dict) -> str:
     return " · ".join(textos)
 
 
+def nome_turma_visual(nome: str) -> str:
+    turno, separador, letra = nome.partition(" - ")
+    return f"{turno.title()} · {letra}" if separador else nome
+
+
+def separar_ocorrencias(resultado: ResultadoInterface) -> tuple[list[dict], list[dict]]:
+    """Usa os motivos já emitidos pelo processamento, sem alterar o resultado."""
+    categorias_aviso = {"Nomes duplicados", "Dados normalizados"}
+    avisos, inconsistencias = [], []
+    for registro in resultado.inconsistencias:
+        destino = avisos if categoria(registro["Motivo"]) in categorias_aviso else inconsistencias
+        destino.append(registro)
+    return inconsistencias, avisos
+
+
+def relatorio_ocorrencias(registros: list[dict], vazio: str) -> str:
+    """Texto da seção; títulos e contadores ficam nos widgets da interface."""
+    if not registros:
+        return vazio
+    grupos: dict[str, list[dict]] = OrderedDict()
+    for registro in registros:
+        grupos.setdefault(categoria(registro["Motivo"]), []).append(registro)
+    linhas = []
+    for nome, itens in grupos.items():
+        linhas.extend([f"{nome.upper()} ({len(itens)})", ""])
+        for registro in itens:
+            linhas.extend([f"{registro['Nome']} · Aba Alunos · Linha(s) {registro['Linha']}",
+                           registro["Motivo"], ""])
+    return "\n".join(linhas).rstrip()
+
+
+def relatorios_interface(resultado: ResultadoInterface) -> tuple[str, str]:
+    inconsistencias, avisos = separar_ocorrencias(resultado)
+    return (relatorio_ocorrencias(inconsistencias, "Nenhuma inconsistência encontrada."),
+            relatorio_ocorrencias(avisos, "Nenhum aviso gerado."))
+
+
 def texto_busca(texto: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", texto.casefold())
                    if not unicodedata.combining(c))

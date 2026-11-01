@@ -5,7 +5,7 @@ from math import ceil
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QAbstractTableModel, QEasingCurve, QModelIndex, QPropertyAnimation, QPoint, QRect, QRectF, QSize, QSortFilterProxyModel, Qt, QThread, Signal
+from PySide6.QtCore import QAbstractTableModel, QEasingCurve, QModelIndex, QPropertyAnimation, QPoint, QRect, QRectF, QSortFilterProxyModel, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import (
@@ -16,23 +16,21 @@ from PySide6.QtWidgets import (
 
 from apresentacao import (
     ResultadoInterface, exportar_planilha, formatar_percentual, processar_planilha,
+    nome_turma_visual, relatorios_interface, separar_ocorrencias,
     texto_busca, texto_diferenca_turmas, texto_variacao_genero,
 )
 
 from recursos import caminho_recurso
 from tema import (
-    AZUL, TURQUESA, VERDE, TURQUESA_ESCURO, TEXTO, TEXTO_SECUNDARIO,
+    AZUL, TURQUESA, TURQUESA_ESCURO, TEXTO, TEXTO_SECUNDARIO,
     FUNDO, BRANCO, BORDA, FUNDO_AZUL, ESTILO, ESPACO, MARGEM_PAINEL,
     ICONE, ICONE_CARD, FONTE_GRAFICO, FONTE_EIXO, ALTURA_EIXO,
     ALTURA_GRAFICO_MINIMA, ALTURA_GRAFICO_MAXIMA,
+    FUNDO_ALERTA, CONTADOR_MINIMO,
+    ESPACO_SECOES, PADDING_ABA_VERTICAL, PADDING_ABA_HORIZONTAL, fonte_interface,
 )
 
 LARGURA_DASHBOARD_DESKTOP = 1200
-LARGURA_CARDS_TRES_COLUNAS = 820
-
-
-def icone_svg(nome):
-    return QIcon(str(caminho_recurso("assets", "icons", nome + ".svg")))
 
 
 def icone_widget(nome, tamanho=ICONE):
@@ -42,11 +40,46 @@ def icone_widget(nome, tamanho=ICONE):
     return widget
 
 
-def fonte_grafico(tamanho=FONTE_GRAFICO):
-    fonte = QFont("Segoe UI")
-    fonte.setPixelSize(tamanho)
-    fonte.setWeight(QFont.Weight.DemiBold)
-    return fonte
+def fonte_grafico(tamanho=FONTE_GRAFICO, peso=QFont.Weight.Normal):
+    return fonte_interface(tamanho, peso)
+
+
+class ContadorOcorrencias(QLabel):
+    """Badge circular que comporta o total sem cortar números com vários dígitos."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("badgeOcorrencias")
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.definir(0)
+
+    def definir(self, quantidade):
+        self.setText(str(quantidade))
+        self.setProperty("vazio", quantidade == 0)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        diametro = max(CONTADOR_MINIMO, self.fontMetrics().horizontalAdvance(self.text()) + 12)
+        self.setFixedSize(diametro, diametro)
+        self.setAccessibleName(f"{quantidade} ocorrências")
+
+    def paintEvent(self, evento):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(FUNDO_AZUL if self.property("vazio") else FUNDO_ALERTA))
+        painter.drawEllipse(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5))
+        painter.end()
+        super().paintEvent(evento)
+
+
+class BotaoNavegacao(QPushButton):
+    """Respeita a altura do conteúdo composto, inclusive quando o texto quebra."""
+
+    def sizeHint(self):
+        return self.layout().sizeHint()
+
+    def minimumSizeHint(self):
+        return self.layout().minimumSize()
 
 
 class NavegacaoSecoes(QFrame):
@@ -63,14 +96,41 @@ class NavegacaoSecoes(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 10)
         layout.setSpacing(5)
+        self.rotulos = []
         for indice, (titulo, icone) in enumerate((
             ("Dashboard", "tab_dashboard"), ("Alunos por turma", "tab_alunos"),
-            ("Inconsistências", "tab_inconsistencias"), ("Avisos", "tab_avisos"),
+            ("Inconsistências e avisos", "tab_inconsistencias"),
         )):
-            botao = QPushButton(titulo)
-            botao.setIcon(icone_svg(icone))
-            botao.setIconSize(QSize(ICONE, ICONE))
+            botao = BotaoNavegacao()
+            botao.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             botao.setObjectName("navegacaoBotao")
+            botao.setMinimumHeight(max(ICONE, CONTADOR_MINIMO) + 2 * PADDING_ABA_VERTICAL)
+            conteudo = QHBoxLayout(botao)
+            conteudo.setContentsMargins(PADDING_ABA_HORIZONTAL, PADDING_ABA_VERTICAL,
+                                       PADDING_ABA_HORIZONTAL, PADDING_ABA_VERTICAL)
+            conteudo.setSpacing(8)
+            conteudo.addStretch()
+            imagem = icone_widget(icone)
+            imagem.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            conteudo.addWidget(imagem)
+            rotulo = QLabel(titulo)
+            rotulo.setObjectName("textoNavegacao")
+            rotulo.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            conteudo.addWidget(rotulo)
+            self.rotulos.append(rotulo)
+            if indice == 2:
+                # Reserva discreta evita deslocar o título quando o total passa de zero.
+                espaco_badge = QWidget()
+                espaco_badge.setMinimumSize(CONTADOR_MINIMO, CONTADOR_MINIMO)
+                espaco_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                layout_badge = QHBoxLayout(espaco_badge)
+                layout_badge.setContentsMargins(0, 0, 0, 0)
+                self.badge = ContadorOcorrencias(espaco_badge)
+                self.badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                self.badge.hide()
+                layout_badge.addWidget(self.badge)
+                conteudo.addWidget(espaco_badge)
+            conteudo.addStretch()
             botao.setCheckable(True)
             botao.setAccessibleName(titulo)
             botao.setShortcut(f"Alt+{indice + 1}")
@@ -79,6 +139,7 @@ class NavegacaoSecoes(QFrame):
             self.botoes.append(botao)
             layout.addWidget(botao, 1)
         self.botoes[0].setChecked(True)
+        self._atualizar_estilo()
         self.grupo.idClicked.connect(self.selecionar)
         self.marcador = QFrame(self)
         self.marcador.setObjectName("marcador")
@@ -92,8 +153,24 @@ class NavegacaoSecoes(QFrame):
             return
         self.indice = indice
         self.botoes[indice].setChecked(True)
+        self._atualizar_estilo()
         self._posicionar(animar=True)
         self.secao_alterada.emit(indice)
+
+    def _atualizar_estilo(self):
+        for indice, rotulo in enumerate(self.rotulos):
+            rotulo.setProperty("ativa", indice == self.indice)
+            rotulo.style().unpolish(rotulo)
+            rotulo.style().polish(rotulo)
+
+    def atualizar_ocorrencias(self, inconsistencias=0, avisos=0):
+        total = inconsistencias + avisos
+        self.badge.definir(total)
+        self.badge.setVisible(total > 0)
+        descricao = f"{inconsistencias} inconsistências e {avisos} avisos; {total} ocorrências"
+        self.badge.setAccessibleName(descricao)
+        self.botoes[2].setAccessibleName(f"Inconsistências e avisos: {descricao}")
+        self.botoes[2].setToolTip(descricao + " (Alt+3)")
 
     def _posicionar(self, animar=False):
         botao = self.botoes[self.indice]
@@ -115,6 +192,56 @@ class NavegacaoSecoes(QFrame):
         super().showEvent(evento)
         self.layout().activate()
         self._posicionar()
+
+
+class RelatorioOcorrencias(QPlainTextEdit):
+    """Relatório selecionável que cresce com as linhas; a página cuida do scroll."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("textoOcorrencias")
+        self.setReadOnly(True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.document().setDocumentMargin(0)
+        self._ajustando = False
+        self._ajuste_altura = QTimer(self)
+        self._ajuste_altura.setSingleShot(True)
+        self._ajuste_altura.timeout.connect(self._ajustar_altura)
+        self.document().documentLayout().documentSizeChanged.connect(self._agendar_altura)
+        self.textChanged.connect(self._agendar_altura)
+        self._agendar_altura()
+
+    def _agendar_altura(self, *_):
+        if not self._ajustando:
+            self._ajuste_altura.start(0)
+
+    def _ajustar_altura(self):
+        self._ajustando = True
+        try:
+            documento = self.document()
+            layout = documento.documentLayout()
+            bloco = documento.begin()
+            altura = 0
+            while bloco.isValid():
+                # blockBoundingRect força o layout também das linhas fora do viewport.
+                altura += layout.blockBoundingRect(bloco).height()
+                bloco = bloco.next()
+            altura = ceil(altura + 2 * documento.documentMargin() + 2 * self.frameWidth()) + 2
+            if altura != self.minimumHeight() or altura != self.maximumHeight():
+                self.setFixedHeight(altura)
+        finally:
+            self._ajustando = False
+
+    def resizeEvent(self, evento):
+        super().resizeEvent(evento)
+        if evento.size().width() != evento.oldSize().width():
+            self._agendar_altura()
+
+    def showEvent(self, evento):
+        super().showEvent(evento)
+        self._agendar_altura()
 
 
 class ModeloAlunos(QAbstractTableModel):
@@ -191,7 +318,7 @@ class GradeResponsiva(QWidget):
         self.grade = QGridLayout(self)
         self.grade.setContentsMargins(0, 0, 0, 0)
         self.grade.setSpacing(12)
-        self.grade.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self.grade.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self._organizar()
 
     def _organizar(self):
@@ -227,6 +354,7 @@ class Grafico(QWidget):
     def __init__(self, por_sexo=False, parent=None):
         super().__init__(parent)
         self.por_sexo = por_sexo
+        self.altura_minima_linha = 52 if por_sexo else 44
         self.dados, self.capacidades = {}, {}
         self.selecionada = ""
         self.areas = []
@@ -236,7 +364,7 @@ class Grafico(QWidget):
     def definir(self, dados, capacidades=None):
         self.dados = dados
         self.capacidades = capacidades or {}
-        self.setMinimumHeight(max(160, len(dados) * (56 if self.por_sexo else 44) + 8))
+        self.setMinimumHeight(max(160, len(dados) * self.altura_minima_linha))
         self.update()
         self.visual_alterado.emit()
 
@@ -270,7 +398,7 @@ class Grafico(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         esquerda, direita, passo, maximo = self.escala()
         largura = direita - esquerda
-        altura_linha = max(56 if self.por_sexo else 44, min(80, self.height() / len(self.dados)))
+        altura_linha = max(self.altura_minima_linha, min(80, self.height() / len(self.dados)))
         for i in range(5):
             x = esquerda + largura * i / 4
             painter.setPen(QPen(QColor(BORDA if i else AZUL), 1.0 if i else 1.3))
@@ -333,7 +461,7 @@ class EixoHorizontal(QWidget):
         painter.fillRect(self.rect(), QColor(BRANCO))
         if not self.grafico.dados:
             return
-        origem = self.area.viewport().mapTo(self, QPoint(0, 0)).x()
+        origem = self.mapFromGlobal(self.area.viewport().mapToGlobal(QPoint(0, 0))).x()
         esquerda, direita, passo, _ = self.grafico.escala(self.area.viewport().width())
         esquerda, direita = esquerda + origem, direita + origem
         painter.setFont(fonte_grafico())
@@ -344,7 +472,7 @@ class EixoHorizontal(QWidget):
             painter.drawLine(int(x), 2, int(x), 7)
             painter.setPen(QColor(TEXTO))
             painter.drawText(QRectF(x - 30, 11, 60, 21), Qt.AlignmentFlag.AlignCenter, str(indice * passo))
-        painter.setFont(fonte_grafico(FONTE_EIXO))
+        painter.setFont(fonte_grafico(FONTE_EIXO, QFont.Weight.DemiBold))
         painter.setPen(QColor(TEXTO))
         painter.drawText(QRectF(esquerda, 36, direita - esquerda, 25), Qt.AlignmentFlag.AlignCenter, self.titulo)
 
@@ -361,6 +489,7 @@ class JanelaPrincipal(QMainWindow):
         self.modo_dashboard = None
         self.indice_dashboard = 0
         self.setWindowTitle("ABC Aprendiz — Ensalamento")
+        self.setWindowIcon(QIcon(str(caminho_recurso("assets", "logo_abc_aprendiz.png"))))
         self.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
         self.setMinimumSize(680, 600)
         self.setStyleSheet(ESTILO)
@@ -377,11 +506,15 @@ class JanelaPrincipal(QMainWindow):
         if novo_modo != self.modo_dashboard:
             self.modo_dashboard = novo_modo
             self.reorganizar_dashboard()
-        colunas = 6 if novo_modo == "desktop" else (
-            3 if self.width() >= LARGURA_CARDS_TRES_COLUNAS else 2
-        )
+        colunas = 4 if novo_modo == "desktop" else 2
         if colunas != self.grade_indicadores.colunas:
             self.grade_indicadores.definir_colunas(colunas)
+        altura = max(ALTURA_GRAFICO_MINIMA, min(ALTURA_GRAFICO_MAXIMA, int(self.height() * 0.48)))
+        for painel in self.grade_graficos.widgets:
+            if painel.minimumHeight() != altura:
+                painel.setMinimumHeight(altura)
+        self.grade_graficos.setMaximumHeight(altura)
+        self.grade_graficos.updateGeometry()
 
     def reorganizar_dashboard(self):
         """Só cruza os modos; mantém widgets, dados, sinais e seleção existentes."""
@@ -412,9 +545,18 @@ class JanelaPrincipal(QMainWindow):
         frame = QFrame()
         frame.setObjectName("painel")
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(17, 14, 17, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(MARGEM_PAINEL, 12, MARGEM_PAINEL, 12)
+        layout.setSpacing(8)
         return frame, layout
+
+    def _titulo_painel(self, layout, texto, icone):
+        linha = QHBoxLayout()
+        linha.setSpacing(8)
+        linha.addWidget(icone_widget(icone))
+        rotulo = self._rotulo(texto, "secao")
+        rotulo.setWordWrap(True)
+        linha.addWidget(rotulo, 1)
+        layout.addLayout(linha)
 
     def _montar(self):
         central = QWidget()
@@ -430,9 +572,13 @@ class JanelaPrincipal(QMainWindow):
         principal.setContentsMargins(22, 17, 22, 15)
         principal.setSpacing(13)
         cabecalho = QHBoxLayout()
-        cabecalho.addWidget(self._rotulo("ABC Aprendiz", "titulo"))
+        logo = QLabel()
+        logo.setPixmap(QPixmap(str(caminho_recurso("assets", "logo_abc_aprendiz.png"))).scaledToHeight(
+            42, Qt.TransformationMode.SmoothTransformation))
+        logo.setAccessibleName("ABC Aprendiz")
+        cabecalho.addWidget(logo)
         cabecalho.addStretch()
-        cabecalho.addWidget(self._rotulo("Ensalamento"))
+        cabecalho.addWidget(self._rotulo("Ensalamento", "titulo"))
         principal.addLayout(cabecalho)
         arquivo, linha_arquivo = self._painel()
         acoes = QHBoxLayout()
@@ -441,7 +587,12 @@ class JanelaPrincipal(QMainWindow):
         acoes.addWidget(self.importar)
         self.nome_arquivo = self._rotulo("Nenhuma planilha selecionada")
         self.nome_arquivo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.nome_arquivo.setMaximumWidth(self.nome_arquivo.sizeHint().width())
         acoes.addWidget(self.nome_arquivo, 1)
+        self.status = self._rotulo("Selecione uma planilha XLSX.")
+        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        acoes.addWidget(self.status, 4)
         self.gerar = QPushButton("Gerar distribuição")
         self.gerar.setObjectName("primario")
         self.gerar.setEnabled(False)
@@ -509,20 +660,55 @@ class JanelaPrincipal(QMainWindow):
         self.contagem = self._rotulo("Sem distribuição.")
         layout_alunos.addWidget(self.contagem)
         self.secoes.addWidget(alunos)
-        relatorio, layout_relatorio = self._painel()
-        relatorio.setMinimumSize(340, 200)
-        layout_relatorio.addWidget(self._rotulo("Inconsistências da instância", "secao"))
-        self.relatorio = QPlainTextEdit()
-        self.relatorio.setReadOnly(True)
-        self.relatorio.setAccessibleName("Relatório agrupado de inconsistências")
-        self.relatorio.setPlainText("Nenhuma instância avaliada.")
-        layout_relatorio.addWidget(self.relatorio, 1)
-        self.secoes.addWidget(relatorio)
+        self.ocorrencias = QScrollArea()
+        self.ocorrencias.setWidgetResizable(True)
+        self.ocorrencias.setFrameShape(QFrame.Shape.NoFrame)
+        self.ocorrencias.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.ocorrencias.setAccessibleName("Inconsistências e avisos com rolagem vertical")
+        conteudo_ocorrencias = QWidget()
+        conteudo_ocorrencias.setObjectName("central")
+        layout_ocorrencias = QVBoxLayout(conteudo_ocorrencias)
+        layout_ocorrencias.setContentsMargins(0, 0, 4, 0)
+        layout_ocorrencias.setSpacing(ESPACO_SECOES)
+        self.contadores_ocorrencias = []
+        self.paineis_ocorrencias = []
+        editores = []
+        for titulo, icone, descricao in (
+            ("Inconsistências", "tab_inconsistencias",
+             "Registros que não entraram no ensalamento e precisam de revisão manual."),
+            ("Avisos", "tab_avisos",
+             "Normalizações automáticas e registros mantidos válidos, sem bloqueio cadastral."),
+        ):
+            painel, caixa = self._painel()
+            painel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+            linha = QHBoxLayout()
+            linha.setSpacing(8)
+            linha.addWidget(icone_widget(icone))
+            linha.addWidget(self._rotulo(titulo, "secao"), 1)
+            contador = ContadorOcorrencias()
+            linha.addWidget(contador)
+            self.contadores_ocorrencias.append(contador)
+            caixa.addLayout(linha)
+            explicacao = self._rotulo(descricao)
+            explicacao.setWordWrap(True)
+            caixa.addWidget(explicacao)
+            editor = RelatorioOcorrencias()
+            editor.setProperty("vazio", True)
+            editor.setAccessibleName(f"Relatório agrupado de {titulo.lower()}")
+            editor.setPlainText("Nenhuma instância avaliada.")
+            caixa.addWidget(editor)
+            editores.append(editor)
+            self.paineis_ocorrencias.append(painel)
+            layout_ocorrencias.addWidget(painel)
+        layout_ocorrencias.addStretch(1)
+        self.ocorrencias.setWidget(conteudo_ocorrencias)
+        self.relatorio, self.avisos = editores
+        self.secoes.addWidget(self.ocorrencias)
+        # O tamanho preferido dos editores não deve forçar rolagem da janela inteira.
+        # A área principal cresce com a janela e cada conteúdo preserva seu mínimo legível.
+        self.secoes.setMinimumHeight(self.secoes.minimumSizeHint().height())
+        self.secoes.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         principal.addWidget(self.secoes, 1)
-        self.status = self._rotulo("Selecione uma planilha XLSX.")
-        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        principal.addWidget(self.status)
         self.progresso = QProgressBar()
         self.progresso.setRange(0, 0)
         self.progresso.setTextVisible(False)
@@ -541,40 +727,44 @@ class JanelaPrincipal(QMainWindow):
         conteudo.setObjectName("central")
         layout = QVBoxLayout(conteudo)
         layout.setContentsMargins(0, 0, 4, 0)
-        layout.setSpacing(13)
-        layout.addWidget(self._rotulo("Resumo", "secao"))
+        layout.setSpacing(ESPACO)
         cards = []
         self.indicadores, self.detalhes_indicadores = [], []
-        for titulo, fundo, cor in (
-            ("Alunos distribuídos", "#E1F3EB", "#207655"),
-            ("Alunos sem turma", "#FCF0C7", "#86691E"),
-            ("Turmas", "#E3EDFC", "#315F9E"),
-            ("Ocupação", "#E1F3EB", "#207655"),
-            ("Ociosidade", "#E3EDFC", "#315F9E"),
-            ("Inconsistências / avisos", "#FCF0C7", "#86691E"),
+        for titulo, icone, tipo in (
+            ("Alunos alocados", "card_alocados", "positivo"),
+            ("Alunos sem turma", "card_sem_turma", "azul"),
+            ("Ocupação", "chart_ocupacao", "turquesa"),
+            ("Ociosidade", "card_resumo_turno", "azul"),
         ):
             frame = QFrame()
-            frame.setStyleSheet(f"QFrame {{background:{fundo};border:1px solid {fundo};border-radius:12px;}} QLabel {{color:{cor};border:none;}}")
-            caixa = QVBoxLayout(frame)
-            caixa.setContentsMargins(14, 11, 14, 11)
-            caixa.setSpacing(4)
-            legenda = QLabel(titulo)
-            legenda.setWordWrap(True)
-            caixa.addWidget(legenda)
-            numero = QLabel("—")
-            numero.setStyleSheet("font-size:25px;font-weight:600;")
-            caixa.addWidget(numero)
+            frame.setObjectName("cardResumo")
+            caixa = QHBoxLayout(frame)
+            caixa.setContentsMargins(MARGEM_PAINEL, 12, MARGEM_PAINEL, 12)
+            caixa.setSpacing(ESPACO)
+            container = QFrame()
+            container.setObjectName("iconeCard")
+            container.setProperty("tipo", tipo)
+            icones = QVBoxLayout(container)
+            icones.setContentsMargins(10, 10, 10, 10)
+            icones.addWidget(icone_widget(icone, ICONE_CARD))
+            caixa.addWidget(container, 0, Qt.AlignmentFlag.AlignVCenter)
+            textos = QVBoxLayout()
+            textos.setSpacing(2)
+            legenda = self._rotulo(titulo)
+            textos.addWidget(legenda)
+            numero = self._rotulo("—", "numeroCard")
+            textos.addWidget(numero)
             detalhe = self._rotulo("")
-            detalhe.setWordWrap(True)
-            caixa.addWidget(detalhe)
+            textos.addWidget(detalhe)
+            caixa.addLayout(textos, 1)
             self.indicadores.append(numero)
             self.detalhes_indicadores.append(detalhe)
             cards.append(frame)
-        self.grade_indicadores = GradeResponsiva(cards, 170, (6, 3, 2, 1))
+        self.grade_indicadores = GradeResponsiva(cards, 230, (4, 2, 1))
         layout.addWidget(self.grade_indicadores)
 
         self.graficos = [Grafico(), Grafico(por_sexo=True)]
-        self.areas_graficos = []
+        self.areas_graficos, self.eixos_graficos = [], []
         self.controles_dashboard = QWidget()
         navegacao = QHBoxLayout(self.controles_dashboard)
         navegacao.setContentsMargins(0, 0, 0, 0)
@@ -592,124 +782,108 @@ class JanelaPrincipal(QMainWindow):
         navegacao.addWidget(self.dashboard_proximo)
         layout.addWidget(self.controles_dashboard)
         paineis = []
-        for grafico, titulo, legenda in zip(self.graficos,
-                ("Alunos por turma", "Homens e mulheres por turma"),
-                ("Alunos / capacidade · Azul: manhã · Verde: tarde", "Azul: homens · Verde: mulheres")):
+        for grafico, titulo, icone, legenda in zip(
+            self.graficos, ("Alunos por turma", "Homens e mulheres por turma"),
+            ("chart_ocupacao", "chart_genero"),
+            ("Azul: manhã · Turquesa: tarde · Alunos / capacidade", "Azul: homens · Turquesa: mulheres"),
+        ):
             painel, caixa = self._painel()
-            painel.setFixedHeight(330)
-            rotulo = self._rotulo(titulo, "secao")
+            self._titulo_painel(caixa, titulo, icone)
+            rotulo = self._rotulo(legenda, "legenda")
             rotulo.setWordWrap(True)
             caixa.addWidget(rotulo)
-            rotulo = self._rotulo(legenda)
-            rotulo.setWordWrap(True)
-            caixa.addWidget(rotulo)
+            caixa.addWidget(self._rotulo("Turma", "eixo"))
             area = QScrollArea()
             area.setWidgetResizable(True)
             area.setFrameShape(QFrame.Shape.NoFrame)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             area.setWidget(grafico)
             self.areas_graficos.append(area)
             caixa.addWidget(area, 1)
+            eixo = EixoHorizontal(grafico, area)
+            caixa.addWidget(eixo)
+            self.eixos_graficos.append(eixo)
             grafico.turma_clicada.connect(self.ir_para_turma)
             paineis.append(painel)
         self.grade_graficos = GradeResponsiva(paineis, 480)
         layout.addWidget(self.grade_graficos)
 
         qualidade, caixa = self._painel()
-        caixa.addWidget(self._rotulo("Qualidade da distribuição", "secao"))
-        caixa.addStretch(1)
+        self._titulo_painel(caixa, "Qualidade da distribuição", "card_qualidade")
         equilibrio = QWidget()
         area_equilibrio = QVBoxLayout(equilibrio)
         area_equilibrio.setContentsMargins(0, 0, 0, 0)
-        area_equilibrio.setSpacing(12)
-        titulo = QLabel("Equilíbrio entre turmas")
-        titulo.setStyleSheet("font-weight:600;")
-        titulo.setWordWrap(True)
-        titulo.setToolTip("Maior diferença de tamanho entre turmas do mesmo turno.")
-        area_equilibrio.addWidget(titulo)
-        tabela_equilibrio = QWidget()
-        tabela_equilibrio.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        grade_equilibrio = QGridLayout(tabela_equilibrio)
-        grade_equilibrio.setContentsMargins(0, 0, 0, 0)
-        grade_equilibrio.setHorizontalSpacing(20)
-        grade_equilibrio.setVerticalSpacing(12)
+        area_equilibrio.setSpacing(6)
+        area_equilibrio.addWidget(self._rotulo("Equilíbrio entre turmas", "subtitulo"))
+        explicacao = self._rotulo("Maior diferença de tamanho no mesmo turno.")
+        explicacao.setWordWrap(True)
+        area_equilibrio.addWidget(explicacao)
+        grade_equilibrio = QGridLayout()
+        grade_equilibrio.setHorizontalSpacing(ESPACO)
+        grade_equilibrio.setVerticalSpacing(6)
         self.diferencas_turmas = {}
         for linha, turno in enumerate(("MANHÃ", "TARDE")):
             grade_equilibrio.addWidget(self._rotulo(turno.title()), linha, 0)
-            rotulo = QLabel("—")
-            rotulo.setStyleSheet("font-size:15px;font-weight:600;")
+            rotulo = self._rotulo("—", "valorQualidade")
             grade_equilibrio.addWidget(rotulo, linha, 1)
             self.diferencas_turmas[turno] = rotulo
-        area_equilibrio.addWidget(tabela_equilibrio, 0, Qt.AlignmentFlag.AlignLeft)
+        area_equilibrio.addLayout(grade_equilibrio)
         area_equilibrio.addStretch()
-
         genero = QWidget()
         area_genero = QVBoxLayout(genero)
         area_genero.setContentsMargins(0, 0, 0, 0)
-        area_genero.setSpacing(12)
-        titulo = QLabel("Maior variação H/M")
-        titulo.setStyleSheet("font-weight:600;")
-        area_genero.addWidget(titulo)
-        self.variacao_genero = QLabel("—")
-        self.variacao_genero.setStyleSheet("font-size:15px;font-weight:600;")
+        area_genero.setSpacing(6)
+        area_genero.addWidget(self._rotulo("Maior variação H/M", "subtitulo"))
+        self.variacao_genero = self._rotulo("—", "valorQualidade")
         self.variacao_genero.setWordWrap(True)
         area_genero.addWidget(self.variacao_genero)
+        self.contexto_variacao = self._rotulo("Turmas com maior variação")
+        self.contexto_variacao.hide()
+        area_genero.addWidget(self.contexto_variacao)
         self.turmas_variacao_genero = self._rotulo("")
         self.turmas_variacao_genero.setWordWrap(True)
         self.turmas_variacao_genero.hide()
         area_genero.addWidget(self.turmas_variacao_genero)
         area_genero.addStretch()
-        self.grade_qualidade = GradeResponsiva([equilibrio, genero], 290)
-        self.grade_qualidade.setMaximumWidth(640)
-        self.grade_qualidade.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        centralizar_qualidade = QHBoxLayout()
-        centralizar_qualidade.addStretch(1)
-        centralizar_qualidade.addWidget(self.grade_qualidade, 10)
-        centralizar_qualidade.addStretch(1)
-        caixa.addLayout(centralizar_qualidade)
-        caixa.addStretch(1)
+        self.grade_qualidade = GradeResponsiva([equilibrio, genero], 240)
+        caixa.addWidget(self.grade_qualidade)
 
         resumo_turnos, caixa = self._painel()
-        caixa.addWidget(self._rotulo("Resumo por turno", "secao"))
-        caixa.addStretch(1)
+        self._titulo_painel(caixa, "Resumo por turno", "card_resumo_turno")
         self.tabela_resumo_turnos = QWidget()
-        self.tabela_resumo_turnos.setAccessibleName("Resumo por turno: Manhã e Tarde")
-        self.tabela_resumo_turnos.setMaximumWidth(520)
+        self.tabela_resumo_turnos.setAccessibleName("Resumo por turno: linhas Manhã e Tarde")
         grade = QGridLayout(self.tabela_resumo_turnos)
         grade.setContentsMargins(0, 0, 0, 0)
-        grade.setHorizontalSpacing(18)
-        grade.setVerticalSpacing(11)
-        grade.setColumnStretch(0, 1)
+        grade.setHorizontalSpacing(6)
+        grade.setVerticalSpacing(0)
+        campos = (("turno", "Turno"), ("alunos_alocados", "Alocados"),
+                  ("alunos_sem_turma", "Sem turma"), ("capacidade_total", "Capacidade"),
+                  ("taxa_ocupacao", "Ocupação"), ("vagas_ociosas", "Vagas livres"))
+        self.rotulos_resumo_turnos = {}
+        for coluna, (chave, texto) in enumerate(campos):
+            cabecalho = self._rotulo(texto, "cabecalhoTabela")
+            cabecalho.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cabecalho.setWordWrap(True)
+            grade.addWidget(cabecalho, 0, coluna)
+            grade.setColumnStretch(coluna, 1)
+            self.rotulos_resumo_turnos[chave] = cabecalho
         self.resumo_turnos = {turno: {} for turno in ("MANHÃ", "TARDE")}
         self.cabecalhos_turnos = {}
-        self.rotulos_resumo_turnos = {}
-        for coluna, turno in enumerate(self.resumo_turnos, 1):
-            cabecalho = QLabel(turno)
-            cabecalho.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            cabecalho.setStyleSheet("font-size:12px;font-weight:600;")
-            grade.addWidget(cabecalho, 0, coluna)
-            self.cabecalhos_turnos[turno] = cabecalho
-            grade.setColumnStretch(coluna, 1)
-        for linha, (chave, texto) in enumerate((
-            ("alunos_alocados", "Alocados"),
-            ("alunos_sem_turma", "Sem turma"), ("capacidade_total", "Capacidade"),
-            ("taxa_ocupacao", "Ocupação"), ("vagas_ociosas", "Vagas livres"),
-        ), 1):
-            rotulo_linha = self._rotulo(texto)
-            rotulo_linha.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            grade.addWidget(rotulo_linha, linha, 0)
-            self.rotulos_resumo_turnos[chave] = rotulo_linha
-            for coluna, turno in enumerate(self.resumo_turnos, 1):
-                rotulo = QLabel("—")
-                rotulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                rotulo.setStyleSheet("font-size:14px;font-weight:600;")
-                grade.addWidget(rotulo, linha, coluna)
-                self.resumo_turnos[turno][chave] = rotulo
-        centralizar = QHBoxLayout()
-        centralizar.addStretch(1)
-        centralizar.addWidget(self.tabela_resumo_turnos, 3)
-        centralizar.addStretch(1)
-        caixa.addLayout(centralizar)
-        caixa.addStretch(1)
+        for indice, turno in enumerate(self.resumo_turnos):
+            separador = QFrame()
+            separador.setObjectName("separador")
+            separador.setFixedHeight(1)
+            grade.addWidget(separador, 1 + indice * 2, 0, 1, len(campos))
+            rotulo = self._rotulo(turno.title(), "turnoTabela")
+            rotulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            grade.addWidget(rotulo, 2 + indice * 2, 0)
+            self.cabecalhos_turnos[turno] = rotulo
+            for coluna, (chave, _) in enumerate(campos[1:], 1):
+                valor = self._rotulo("—", "valorTabela")
+                valor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                grade.addWidget(valor, 2 + indice * 2, coluna)
+                self.resumo_turnos[turno][chave] = valor
+        caixa.addWidget(self.tabela_resumo_turnos)
         self.grade_resumos = GradeResponsiva([qualidade, resumo_turnos], 390)
         layout.addWidget(self.grade_resumos)
         layout.addStretch()
@@ -736,6 +910,7 @@ class JanelaPrincipal(QMainWindow):
         self.arquivo = Path(arquivo)
         self.resultado = None
         self.nome_arquivo.setText(self.arquivo.name)
+        self.nome_arquivo.setMaximumWidth(self.nome_arquivo.sizeHint().width())
         self.nome_arquivo.setToolTip(str(self.arquivo))
         self.turma.clear()
         self.modelo.definir([])
@@ -752,11 +927,14 @@ class JanelaPrincipal(QMainWindow):
         self.variacao_genero.setToolTip("")
         self.turmas_variacao_genero.clear()
         self.turmas_variacao_genero.hide()
+        self.contexto_variacao.hide()
         for valores in self.resumo_turnos.values():
             for rotulo in valores.values():
                 rotulo.setText("—")
         self.dashboard.verticalScrollBar().setValue(0)
         self.relatorio.setPlainText("Nenhuma distribuição realizada para esta planilha.")
+        self.avisos.setPlainText("Nenhuma distribuição realizada para esta planilha.")
+        self._atualizar_ocorrencias()
         self.contagem.setText("Sem distribuição.")
         self.status.setText("Planilha selecionada.")
         self._atualizar_botoes()
@@ -781,27 +959,41 @@ class JanelaPrincipal(QMainWindow):
 
     def mostrar_resultado(self, resultado: ResultadoInterface):
         self.resultado = resultado
-        self._mostrar_dashboard(resultado.metricas, len(resultado.inconsistencias))
+        self._mostrar_dashboard(resultado.metricas)
         self.turma.blockSignals(True)
         self.turma.clear()
         self.turma.addItems(list(resultado.grupos))
         self.turma.blockSignals(False)
         self.mostrar_turma(self.turma.currentText())
-        self.relatorio.setPlainText(resultado.relatorio())
+        inconsistencias, avisos = relatorios_interface(resultado)
+        self.relatorio.setPlainText(inconsistencias)
+        self.avisos.setPlainText(avisos)
+        self._atualizar_ocorrencias(*map(len, separar_ocorrencias(resultado)))
         self.status.setText("Distribuição concluída. A planilha original ainda não foi alterada.")
         self._atualizar_botoes()
 
-    def _mostrar_dashboard(self, metricas, avisos):
+    def _atualizar_ocorrencias(self, inconsistencias=0, avisos=0):
+        for contador, quantidade, titulo in zip(
+                self.contadores_ocorrencias, (inconsistencias, avisos), ("inconsistências", "avisos")):
+            contador.definir(quantidade)
+            contador.setAccessibleName(f"{quantidade} {titulo}")
+        for editor, quantidade in zip((self.relatorio, self.avisos), (inconsistencias, avisos)):
+            editor.setProperty("vazio", quantidade == 0)
+            editor.style().unpolish(editor)
+            editor.style().polish(editor)
+        self.navegacao.atualizar_ocorrencias(inconsistencias, avisos)
+
+    def _mostrar_dashboard(self, metricas):
         resumo = metricas["resumo"]
         for rotulo, valor in zip(self.indicadores, (
-            resumo["alunos_alocados"], resumo["alunos_sem_turma"], resumo["total_turmas"],
-            formatar_percentual(resumo["taxa_ocupacao"]), formatar_percentual(resumo["taxa_ociosidade"]), avisos,
+            f"{resumo['alunos_alocados']} / {resumo['total_alunos']}", resumo["alunos_sem_turma"],
+            formatar_percentual(resumo["taxa_ocupacao"]), formatar_percentual(resumo["taxa_ociosidade"]),
         )):
             rotulo.setText(str(valor))
         self.detalhes_indicadores[0].setText(
-            f"de {resumo['total_alunos']} alunos · {formatar_percentual(resumo['percentual_alocados'])}"
+            f"{formatar_percentual(resumo['percentual_alocados'])} dos alunos"
         )
-        self.detalhes_indicadores[4].setText(f"{resumo['vagas_ociosas']} vagas livres")
+        self.detalhes_indicadores[3].setText(f"{resumo['vagas_ociosas']} vagas livres")
         turmas = metricas["turmas"]
         self.graficos[0].definir({t["nome"]: t["total_alunos"] for t in turmas},
                                  {t["nome"]: t["capacidade"] for t in turmas})
@@ -812,8 +1004,11 @@ class JanelaPrincipal(QMainWindow):
         variacao = metricas["destaques"]["variacao_genero"]
         self.variacao_genero.setText(texto_variacao_genero(variacao))
         self.variacao_genero.setToolTip(", ".join(variacao["turmas"]))
-        self.turmas_variacao_genero.setText(", ".join(variacao["turmas"]) if variacao["quantidade"] else "")
+        self.turmas_variacao_genero.setText(
+            "    ".join(nome_turma_visual(nome) for nome in variacao["turmas"]) if variacao["quantidade"] else ""
+        )
         self.turmas_variacao_genero.setVisible(bool(variacao["quantidade"]))
+        self.contexto_variacao.setVisible(bool(variacao["quantidade"]))
         for turno, rotulos in self.resumo_turnos.items():
             dados = metricas["por_turno"][turno]
             for chave, rotulo in rotulos.items():
@@ -896,23 +1091,23 @@ def iniciar():
     app.setOrganizationName("ABC Aprendiz")
     app.setStyle("Fusion")
     paleta = QPalette()
-    for papel, cor in ((QPalette.ColorRole.Window, "#F2F5FA"),
+    for papel, cor in ((QPalette.ColorRole.Window, FUNDO),
                        (QPalette.ColorRole.WindowText, TEXTO),
-                       (QPalette.ColorRole.Base, "#FFFFFF"),
-                       (QPalette.ColorRole.AlternateBase, "#F3F7FD"),
+                       (QPalette.ColorRole.Base, BRANCO),
+                       (QPalette.ColorRole.AlternateBase, FUNDO),
                        (QPalette.ColorRole.Text, TEXTO),
-                       (QPalette.ColorRole.Button, "#E8EFFB"),
+                       (QPalette.ColorRole.Button, FUNDO_AZUL),
                        (QPalette.ColorRole.ButtonText, TEXTO),
-                       (QPalette.ColorRole.Highlight, "#DFE9F5"),
+                       (QPalette.ColorRole.Highlight, FUNDO_AZUL),
                        (QPalette.ColorRole.HighlightedText, TEXTO),
-                       (QPalette.ColorRole.Light, "#FFFFFF"),
-                       (QPalette.ColorRole.Mid, "#CED8E5"),
-                       (QPalette.ColorRole.Dark, "#A5B4C7"),
-                       (QPalette.ColorRole.ToolTipBase, "#FFFFFF"),
+                       (QPalette.ColorRole.Light, BRANCO),
+                       (QPalette.ColorRole.Mid, BORDA),
+                       (QPalette.ColorRole.Dark, TEXTO_SECUNDARIO),
+                       (QPalette.ColorRole.ToolTipBase, BRANCO),
                        (QPalette.ColorRole.ToolTipText, TEXTO)):
         paleta.setColor(papel, QColor(cor))
     app.setPalette(paleta)
-    app.setFont(QFont("Segoe UI", 10))
+    app.setFont(fonte_interface())
     janela = JanelaPrincipal()
     tela = app.primaryScreen().availableGeometry()
     janela.resize(min(janela.width(), tela.width()), min(janela.height(), tela.height()))

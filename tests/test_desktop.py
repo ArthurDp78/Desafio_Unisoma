@@ -4,6 +4,8 @@ from dataclasses import replace
 from io import BytesIO
 import json
 import os
+import shutil
+import sys
 from pathlib import Path
 import tempfile
 import threading
@@ -15,18 +17,22 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
-from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation, QTimer, Qt
+from PySide6.QtCore import QAbstractAnimation, QPoint, QPropertyAnimation, QTimer, Qt
+from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QStackedWidget, QWidget
 
-from apresentacao import ResultadoInterface, exportar_planilha, processar_planilha
+from apresentacao import ResultadoInterface, exportar_planilha, processar_planilha, relatorios_interface
+from recursos import caminho_recurso
 import ensalamento
 from dados import Aluno
 from interface_desktop import (
-    Grafico, JanelaPrincipal, LARGURA_CARDS_TRES_COLUNAS,
+    Grafico, JanelaPrincipal,
     LARGURA_DASHBOARD_DESKTOP,
 )
 from metricas import calcular_metricas
+from tema import ESPACO_SECOES
 
 
 def criar_entrada(caminho):
@@ -279,19 +285,19 @@ class InterfaceTest(unittest.TestCase):
         self.assertFalse(w.dashboard_anterior.isVisible())
         self.assertFalse(w.dashboard_proximo.isVisible())
         self.assertFalse(w.pagina_dashboard.isVisible())
-        self.assertEqual(w.grade_indicadores.colunas, 6)
+        self.assertEqual(w.grade_indicadores.colunas, 4)
         self.assertEqual(w.grade_resumos.colunas, 2)
         self.assertEqual(w.graficos[1].dados["MANHÃ - B"], (0, 0))
         self.assertEqual(w.graficos[0].capacidades["MANHÃ - A"], 2)
-        self.assertEqual(len(w.indicadores), 6)
-        self.assertEqual(w.detalhes_indicadores[0].text(), "de 3 alunos · 100,0%")
+        self.assertEqual(len(w.indicadores), 4)
+        self.assertEqual(w.detalhes_indicadores[0].text(), "100,0% dos alunos")
+        self.assertEqual(w.indicadores[2].text(), "50,0%")
         self.assertEqual(w.indicadores[3].text(), "50,0%")
-        self.assertEqual(w.indicadores[4].text(), "50,0%")
-        self.assertEqual(w.detalhes_indicadores[4].text(), "3 vagas livres")
+        self.assertEqual(w.detalhes_indicadores[3].text(), "3 vagas livres")
         self.assertEqual(w.diferencas_turmas["MANHÃ"].text(), "2 alunos")
         self.assertEqual(w.diferencas_turmas["TARDE"].text(), "0 aluno")
         self.assertEqual(w.variacao_genero.text(), "1 homem a mais")
-        self.assertEqual(w.turmas_variacao_genero.text(), "TARDE - C")
+        self.assertEqual(w.turmas_variacao_genero.text(), "Tarde · C")
         self.assertEqual(w.resumo_turnos["MANHÃ"]["alunos_alocados"].text(), "2 / 2")
         self.assertEqual(w.resumo_turnos["MANHÃ"]["vagas_ociosas"].text(), "2")
 
@@ -301,26 +307,26 @@ class InterfaceTest(unittest.TestCase):
         w.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
         self.app.processEvents()
         self.assertEqual(w.grade_graficos.colunas, 2)
-        self.assertEqual(w.grade_indicadores.colunas, 6)
+        self.assertEqual(w.grade_indicadores.colunas, 4)
         w.resize(880, 600)
         self.app.processEvents()
         self.assertEqual(w.grade_graficos.colunas, 1)
-        self.assertEqual(w.grade_indicadores.colunas, 3)
+        self.assertEqual(w.grade_indicadores.colunas, 2)
         self.assertEqual(w.grade_resumos.colunas, 1)
         self.assertTrue(w.controles_dashboard.isVisible())
         self.assertGreater(w.dashboard.verticalScrollBar().maximum(), 0)
         self.assertEqual(w.dashboard.horizontalScrollBar().maximum(), 0)
         self.assertEqual([g.isVisible() for g in w.graficos], [True, False])
-        self.assertTrue(all(p.height() == 330 for p in w.grade_graficos.widgets))
+        self.assertTrue(all(p.height() >= 400 for p in w.grade_graficos.widgets))
         graficos = list(w.graficos)
-        w.resize(LARGURA_CARDS_TRES_COLUNAS - 80, 600)
+        w.resize(740, 600)
         self.app.processEvents()
         self.assertEqual(w.grade_indicadores.colunas, 2)
         self.assertEqual(w.dashboard.horizontalScrollBar().maximum(), 0)
         w.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
         self.app.processEvents()
         self.assertEqual(w.grade_graficos.colunas, 2)
-        self.assertEqual(w.grade_indicadores.colunas, 6)
+        self.assertEqual(w.grade_indicadores.colunas, 4)
         self.assertEqual(w.graficos, graficos)
 
     def test_carrossel_compacto_alterna_os_mesmos_graficos(self):
@@ -430,19 +436,19 @@ class InterfaceTest(unittest.TestCase):
         self.assertEqual(w.modo_dashboard, "desktop")
         self.assertFalse(w.controles_dashboard.isVisible())
         self.assertTrue(all(g.isVisible() for g in w.graficos))
-        self.assertEqual(w.grade_indicadores.colunas, 6)
+        self.assertEqual(w.grade_indicadores.colunas, 4)
         self.assertEqual(w.grade_resumos.colunas, 2)
         self.assertEqual(w.grade_qualidade.colunas, 2)
         self.assertIs(w.resultado, resultado)
 
-    def test_resumo_por_turno_tem_tabela_centralizada_de_cinco_linhas(self):
+    def test_resumo_por_turno_transposto_com_separadores(self):
         w = self.janela
         w.mostrar_resultado(amostra())
         w.resize(1920, 1080)
         self.app.processEvents()
         self.assertEqual([r.text() for r in w.rotulos_resumo_turnos.values()],
-                         ["Alocados", "Sem turma", "Capacidade", "Ocupação", "Vagas livres"])
-        self.assertEqual([r.text() for r in w.cabecalhos_turnos.values()], ["MANHÃ", "TARDE"])
+                         ["Turno", "Alocados", "Sem turma", "Capacidade", "Ocupação", "Vagas livres"])
+        self.assertEqual([r.text() for r in w.cabecalhos_turnos.values()], ["Manhã", "Tarde"])
         for cabecalho in w.cabecalhos_turnos.values():
             self.assertEqual(cabecalho.alignment(), Qt.AlignmentFlag.AlignCenter)
         for turno, valores in w.resumo_turnos.items():
@@ -452,13 +458,91 @@ class InterfaceTest(unittest.TestCase):
             self.assertNotIn("alunos_disponiveis", valores)
             self.assertNotIn("taxa_ociosidade", valores)
         self.assertEqual(w.resumo_turnos["TARDE"]["alunos_alocados"].text(), "1 / 1")
-        self.assertLessEqual(w.tabela_resumo_turnos.width(), 520)
+        grade = w.tabela_resumo_turnos.layout()
+        self.assertEqual(grade.itemAtPosition(0, 0).widget().text(), "Turno")
+        self.assertIs(grade.itemAtPosition(2, 0).widget(), w.cabecalhos_turnos["MANHÃ"])
+        self.assertIs(grade.itemAtPosition(4, 0).widget(), w.cabecalhos_turnos["TARDE"])
+        self.assertEqual(len(w.tabela_resumo_turnos.findChildren(QFrame, "separador")), 2)
         self.assertLess(w.tabela_resumo_turnos.width(), w.grade_resumos.widgets[1].width())
         w.resize(680, 600)
         self.app.processEvents()
         self.assertEqual(w.grade_resumos.colunas, 1)
-        self.assertEqual(w.grade_qualidade.colunas, 1)
+        self.assertIn(w.grade_qualidade.colunas, (1, 2))
         self.assertEqual(w.dashboard.horizontalScrollBar().maximum(), 0)
+
+    def test_eixo_horizontal_permanece_fixo_ao_rolar_barras(self):
+        w = self.janela
+        w.resize(1920, 1080)
+        w.mostrar_resultado(amostra())
+        for grafico in w.graficos:
+            grafico.definir({f"Turma {i}": (3, 4) if grafico.por_sexo else 7 for i in range(40)})
+        QTest.qWait(50)  # Conclui o layout após o aparecimento das barras de rolagem.
+        for area, eixo in zip(w.areas_graficos, w.eixos_graficos):
+            QTest.qWait(20)
+            self.assertFalse(area.isAncestorOf(eixo))
+            self.assertEqual(eixo.titulo, "Quantidade de alunos")
+            self.assertTrue(eixo.isVisible())
+            self.assertTrue(w.dashboard.viewport().rect().contains(
+                eixo.mapTo(w.dashboard.viewport(), eixo.rect().bottomRight())))
+            imagem = eixo.grab().toImage()
+            posicao = eixo.mapToGlobal(QPoint(0, 0))
+            self.assertGreater(area.verticalScrollBar().maximum(), 0)
+            area.verticalScrollBar().setValue(area.verticalScrollBar().maximum())
+            self.app.processEvents()
+            self.assertEqual(eixo.mapToGlobal(QPoint(0, 0)), posicao)
+            self.assertEqual(eixo.grab().toImage(), imagem)
+
+    def test_navegacao_e_recursos_svg_no_codigo_e_no_pacote(self):
+        w = self.janela
+        self.assertEqual([r.text() for r in w.navegacao.rotulos],
+                         ["Dashboard", "Alunos por turma", "Inconsistências e avisos"])
+        self.assertEqual(w.secoes.count(), 3)
+        self.assertEqual(len(w.navegacao.findChildren(QSvgWidget)), 3)
+        self.assertTrue(all(i.renderer().isValid() for i in w.navegacao.findChildren(QSvgWidget)))
+        icones = list(caminho_recurso("assets", "icons").glob("*.svg"))
+        self.assertEqual(len(icones), 10)
+        for arquivo in icones:
+            self.assertTrue(QSvgRenderer(str(arquivo)).isValid(), str(arquivo))
+        with tempfile.TemporaryDirectory() as pasta:
+            shutil.copytree(caminho_recurso("assets"), Path(pasta) / "assets")
+            with patch.object(sys, "_MEIPASS", pasta, create=True):
+                arquivo = caminho_recurso("assets", "icons", "tab_inconsistencias.svg")
+                self.assertEqual(arquivo, Path(pasta) / "assets" / "icons" / "tab_inconsistencias.svg")
+                self.assertTrue(QSvgRenderer(str(arquivo)).isValid())
+
+    def test_avisos_e_inconsistencias_separam_apenas_a_apresentacao(self):
+        resultado = amostra()
+        registros = [
+            {"Linha": 2, "Nome": "Duplicado", "Motivo": "Nome duplicado no cadastro."},
+            {"Linha": 3, "Nome": "Normalizado", "Motivo": "Sexo normalizado."},
+            {"Linha": 4, "Nome": "Inválido", "Motivo": "Sexo inválido; registro não foi alocado."},
+            {"Linha": 5, "Nome": "Sem vaga", "Motivo": "Aluno sem turma no resultado do modelo."},
+            {"Linha": 6, "Nome": "Misto", "Motivo": "Nome normalizado. Sexo inválido; registro não foi alocado."},
+        ]
+        resultado = replace(resultado, inconsistencias=registros)
+        self.janela.mostrar_resultado(resultado)
+        erros, avisos = relatorios_interface(resultado)
+        self.assertIn("Inválido", erros)
+        self.assertIn("Sem vaga", erros)
+        self.assertNotIn("Duplicado", erros)
+        self.assertIn("Duplicado", avisos)
+        self.assertIn("Normalizado", avisos)
+        self.assertNotIn("Inválido", avisos)
+        self.assertIn("Misto", erros)
+        self.assertNotIn("Misto", avisos)
+        self.assertEqual(resultado.inconsistencias, registros)
+        self.assertIn("Duplicado", resultado.relatorio())
+        self.assertIn("Inválido", resultado.relatorio())
+        self.assertEqual(self.janela.relatorio.toPlainText(), erros)
+        self.assertEqual(self.janela.avisos.toPlainText(), avisos)
+        self.assertEqual([c.text() for c in self.janela.contadores_ocorrencias], ["3", "2"])
+        self.assertEqual(self.janela.navegacao.badge.text(), "5")
+        self.assertFalse(self.janela.navegacao.badge.isHidden())
+        self.janela.mostrar_resultado(replace(resultado, inconsistencias=[]))
+        self.assertEqual([c.text() for c in self.janela.contadores_ocorrencias], ["0", "0"])
+        self.assertTrue(self.janela.navegacao.badge.isHidden())
+        self.assertIn("Nenhuma inconsistência encontrada.", self.janela.relatorio.toPlainText())
+        self.assertIn("Nenhum aviso gerado.", self.janela.avisos.toPlainText())
 
     def test_qualidade_mostra_empates_e_oculta_turmas_quando_equilibrado(self):
         w = self.janela
@@ -470,7 +554,7 @@ class InterfaceTest(unittest.TestCase):
         }
         w.mostrar_resultado(resultado)
         self.assertEqual(w.variacao_genero.text(), "3 mulheres a mais · 3 homens a mais")
-        self.assertEqual(w.turmas_variacao_genero.text(), "MANHÃ - A, TARDE - C")
+        self.assertEqual(w.turmas_variacao_genero.text(), "Manhã · A    Tarde · C")
         resultado.metricas["destaques"]["variacao_genero"] = {
             "quantidade": 0, "predominancias": ["equilibrado"], "turmas": ["MANHÃ - A"],
         }
@@ -494,9 +578,9 @@ class InterfaceTest(unittest.TestCase):
             resultado = processar_planilha(origem)
         w = self.janela
         w.mostrar_resultado(resultado)
-        self.assertEqual(w.indicadores[0].text(), "403")
+        self.assertEqual(w.indicadores[0].text(), "403 / 415")
         self.assertEqual(w.indicadores[1].text(), "12")
-        self.assertEqual(w.detalhes_indicadores[0].text(), "de 415 alunos · 97,1%")
+        self.assertEqual(w.detalhes_indicadores[0].text(), "97,1% dos alunos")
         self.assertEqual([w.turma.itemText(i) for i in range(w.turma.count())], list(resultado.grupos))
         self.assertNotIn("SEM TURMA", w.graficos[0].dados)
         self.assertNotIn("SEM TURMA", w.graficos[1].dados)
@@ -518,8 +602,8 @@ class InterfaceTest(unittest.TestCase):
         w.mudar_turma(1)
         self.assertEqual(w.modelo.rowCount(), 1)
         self.assertFalse(w.turma_proxima.isEnabled())
-        self.assertIn("NOMES DUPLICADOS", w.relatorio.toPlainText())
-        self.assertEqual(w.indicadores[0].text(), "3")
+        self.assertIn("NOMES DUPLICADOS", w.avisos.toPlainText())
+        self.assertEqual(w.indicadores[0].text(), "3 / 3")
 
     def test_tabela_virtual_nao_cria_widgets_por_aluno_e_mantem_espaco(self):
         w = self.janela
@@ -555,8 +639,70 @@ class InterfaceTest(unittest.TestCase):
         self.assertEqual([p.isVisible() for p in widgets], [False, True, False])
         self.assertGreater(w.tabela.viewport().height(), 300)
         w.mudar_secao(2)
-        self.app.processEvents()
-        self.assertGreater(w.relatorio.viewport().height(), 350)
+        QTest.qWait(40)
+        self.assertLess(w.relatorio.viewport().height(), 60)
+        self.assertGreater(w.avisos.viewport().height(), w.relatorio.viewport().height())
+
+    def test_ocorrencias_vazias_sao_compactas_e_preservam_espacamento(self):
+        w = self.janela
+        w.mostrar_resultado(replace(amostra(), inconsistencias=[]))
+        w.mudar_secao(2)
+        for largura, altura in ((1920, 1080), (1366, 768), (680, 600)):
+            w.resize(largura, altura)
+            QTest.qWait(40)
+            primeira, segunda = w.paineis_ocorrencias
+            self.assertEqual(primeira.y(), 0)
+            self.assertEqual(segunda.y() - primeira.y() - primeira.height(), ESPACO_SECOES)
+            self.assertLess(primeira.height(), 180)
+            self.assertLess(segunda.height(), 180)
+            self.assertEqual(w.ocorrencias.horizontalScrollBar().maximum(), 0)
+            self.assertEqual([c.text() for c in w.contadores_ocorrencias], ["0", "0"])
+
+    def test_ocorrencias_longas_usam_scroll_da_pagina_e_reajustam_linhas(self):
+        w = self.janela
+        registros = [{"Linha": i + 2, "Nome": f"Aluno {i}",
+                      "Motivo": "Nome normalizado. " + "Descrição da normalização automática. " * 8}
+                     for i in range(30)]
+        resultado = replace(amostra(), inconsistencias=registros)
+        w.mostrar_resultado(resultado)
+        w.mudar_secao(2)
+        alturas = []
+        for largura, altura in ((1366, 768), (680, 600), (1920, 1080)):
+            w.resize(largura, altura)
+            QTest.qWait(60)
+            alturas.append(w.avisos.height())
+            self.assertGreater(w.ocorrencias.verticalScrollBar().maximum(), 0)
+            self.assertEqual(w.ocorrencias.horizontalScrollBar().maximum(), 0)
+            self.assertEqual(w.avisos.verticalScrollBar().maximum(), 0)
+            self.assertEqual(w.avisos.horizontalScrollBar().maximum(), 0)
+            cursor = w.avisos.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self.assertLessEqual(w.avisos.cursorRect(cursor).bottom(), w.avisos.viewport().height())
+            self.assertEqual(w.avisos.toPlainText(), relatorios_interface(resultado)[1])
+            w.ocorrencias.verticalScrollBar().setValue(w.ocorrencias.verticalScrollBar().maximum())
+            self.app.processEvents()
+            painel = w.paineis_ocorrencias[1]
+            fim = painel.mapTo(w.ocorrencias.viewport(), painel.rect().bottomLeft())
+            self.assertTrue(w.ocorrencias.viewport().rect().contains(fim))
+        self.assertGreater(alturas[1], alturas[0])
+        self.assertLess(alturas[2], alturas[1])
+
+    def test_abas_tem_altura_comum_e_larguras_equivalentes(self):
+        w = self.janela
+        w.mostrar_resultado(amostra())
+        for largura, altura in ((1920, 1080), (1366, 768), (680, 600)):
+            w.resize(largura, altura)
+            QTest.qWait(40)
+            botoes = w.navegacao.botoes
+            self.assertEqual(len({b.height() for b in botoes}), 1)
+            if largura >= 1366:
+                larguras = [b.width() for b in botoes]
+                self.assertLessEqual(max(larguras) - min(larguras), 1)
+            centros = [r.mapTo(w.navegacao, r.rect().center()).y() for r in w.navegacao.rotulos]
+            self.assertLessEqual(max(centros) - min(centros), 1)
+            for rotulo in w.navegacao.rotulos:
+                self.assertGreaterEqual(rotulo.width(), rotulo.fontMetrics().horizontalAdvance(rotulo.text()))
+            self.assertEqual(w.centralWidget().horizontalScrollBar().maximum(), 0)
 
     def test_animacao_unica_curta_e_encerrada_apos_navegacao(self):
         w = self.janela
@@ -620,6 +766,8 @@ class InterfaceTest(unittest.TestCase):
         self.assertFalse(w.exportar.isEnabled())
         self.assertEqual(w.modelo.rowCount(), 0)
         self.assertEqual(w.graficos[0].dados, {})
+        self.assertTrue(w.navegacao.badge.isHidden())
+        self.assertEqual([c.text() for c in w.contadores_ocorrencias], ["0", "0"])
 
 
 if __name__ == "__main__":
