@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLayout,
-    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea, QSizePolicy, QStackedWidget, QTableView, QVBoxLayout, QWidget,
 )
 
@@ -21,6 +21,7 @@ from apresentacao import (
 )
 
 from recursos import caminho_recurso
+from relatorio_pdf import IdentificacaoExecucao, exportar_relatorio_pdf
 from tema import (
     AZUL, TURQUESA, TURQUESA_ESCURO, TEXTO, TEXTO_SECUNDARIO,
     FUNDO, BRANCO, BORDA, FUNDO_AZUL, ESTILO, ESPACO, MARGEM_PAINEL,
@@ -527,8 +528,11 @@ class JanelaPrincipal(QMainWindow):
         super().__init__()
         self.processador = processador
         self.exportador = exportador
+        self.exportador_pdf = exportar_relatorio_pdf
         self.arquivo = None
         self.resultado = None
+        self.execucao_relatorio = None
+        self.modo_acoes_arquivo = None
         self._tarefa = None
         self._ocupado = False
         self.modo_dashboard = None
@@ -550,6 +554,7 @@ class JanelaPrincipal(QMainWindow):
             self._atualizar_modo_dashboard()
 
     def _atualizar_modo_dashboard(self):
+        self._organizar_acoes_arquivo()
         novo_modo = "desktop" if self.width() >= LARGURA_DASHBOARD_DESKTOP else "compacto"
         if novo_modo != self.modo_dashboard:
             self.modo_dashboard = novo_modo
@@ -564,6 +569,27 @@ class JanelaPrincipal(QMainWindow):
         self.grade_graficos.setMaximumHeight(altura)
         self.grade_graficos.updateGeometry()
         self._ajuste_dashboard.start(0)
+
+    def _organizar_acoes_arquivo(self):
+        compacto = self.width() < 900
+        if compacto == self.modo_acoes_arquivo:
+            return
+        self.modo_acoes_arquivo = compacto
+        grade = self.acoes_arquivo
+        while grade.count():
+            grade.takeAt(0)
+        for coluna in range(5):
+            grade.setColumnStretch(coluna, 0)
+        if compacto:
+            grade.addWidget(self.importar, 0, 0)
+            grade.addWidget(self.nome_arquivo, 0, 1, 1, 2)
+            for coluna, botao in enumerate((self.gerar, self.exportar, self.exportar_pdf)):
+                grade.addWidget(botao, 1, coluna)
+                grade.setColumnStretch(coluna, 1)
+        else:
+            for coluna, widget in enumerate((self.importar, self.nome_arquivo, self.gerar, self.exportar, self.exportar_pdf)):
+                grade.addWidget(widget, 0, coluna)
+            grade.setColumnStretch(1, 1)
 
     def _ajustar_excesso_dashboard(self):
         """Cede apenas poucos pixels dos gráficos quando isso elimina o scroll externo."""
@@ -650,24 +676,26 @@ class JanelaPrincipal(QMainWindow):
         cabecalho.addWidget(self._rotulo("Sistema de Ensalamento", "titulo"))
         principal.addLayout(cabecalho)
         arquivo, linha_arquivo = self._painel()
-        acoes = QHBoxLayout()
+        self.acoes_arquivo = QGridLayout()
         self.importar = QPushButton("Importar XLSX…")
         self.importar.clicked.connect(self.escolher_arquivo)
-        acoes.addWidget(self.importar)
         self.nome_arquivo = self._rotulo("Nenhuma planilha selecionada")
         self.nome_arquivo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        acoes.addWidget(self.nome_arquivo, 1)
         self.gerar = QPushButton("Gerar distribuição")
         self.gerar.setObjectName("primario")
         self.gerar.setEnabled(False)
         self.gerar.clicked.connect(self.gerar_distribuicao)
-        acoes.addWidget(self.gerar)
         self.exportar = QPushButton("Exportar XLSX…")
         self.exportar.setObjectName("exportar")
         self.exportar.setEnabled(False)
         self.exportar.clicked.connect(self.escolher_destino)
-        acoes.addWidget(self.exportar)
-        linha_arquivo.addLayout(acoes)
+        self.exportar_pdf = QPushButton("Exportar relatório PDF")
+        self.exportar_pdf.setObjectName("exportar")
+        self.exportar_pdf.setToolTip("Salvar o relatório completo, incluindo todos os alunos por turma")
+        self.exportar_pdf.setEnabled(False)
+        self.exportar_pdf.clicked.connect(self.escolher_destino_pdf)
+        linha_arquivo.addLayout(self.acoes_arquivo)
+        self._organizar_acoes_arquivo()
         principal.addWidget(arquivo)
         self.carregamento = QWidget()
         linha_carregamento = QVBoxLayout(self.carregamento)
@@ -683,6 +711,26 @@ class JanelaPrincipal(QMainWindow):
         linha_carregamento.addWidget(self.progresso)
         self.carregamento.hide()
         principal.addWidget(self.carregamento)
+        self.banner_erro = QFrame()
+        self.banner_erro.setObjectName("bannerErro")
+        linha_erro = QHBoxLayout(self.banner_erro)
+        linha_erro.setContentsMargins(MARGEM_PAINEL, 12, MARGEM_PAINEL, 12)
+        linha_erro.setSpacing(10)
+        linha_erro.addWidget(icone_widget("tab_inconsistencias"), 0, Qt.AlignmentFlag.AlignTop)
+        textos_erro = QVBoxLayout()
+        textos_erro.setSpacing(4)
+        self.titulo_erro = self._rotulo("Não foi possível processar a planilha.", "subtitulo")
+        self.orientacao_erro = self._rotulo("Verifique se o arquivo está no formato esperado pelo sistema.")
+        self.detalhe_erro = self._rotulo("")
+        for rotulo in (self.titulo_erro, self.orientacao_erro, self.detalhe_erro):
+            rotulo.setWordWrap(True)
+            rotulo.setTextFormat(Qt.TextFormat.PlainText)
+            rotulo.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            textos_erro.addWidget(rotulo)
+        self.detalhe_erro.hide()
+        linha_erro.addLayout(textos_erro, 1)
+        self.banner_erro.hide()
+        principal.addWidget(self.banner_erro)
         self.navegacao = NavegacaoSecoes()
         principal.addWidget(self.navegacao)
         self.secoes = QStackedWidget()
@@ -999,6 +1047,7 @@ class JanelaPrincipal(QMainWindow):
         self.importar.setEnabled(not self._ocupado)
         self.gerar.setEnabled(self.arquivo is not None and not self._ocupado)
         self.exportar.setEnabled(self.resultado is not None and not self._ocupado)
+        self.exportar_pdf.setEnabled(self.resultado is not None and not self._ocupado)
         self.turma.setEnabled(self.resultado is not None)
         self.busca.setEnabled(self.resultado is not None)
         self.filtro_sexo.setEnabled(self.resultado is not None)
@@ -1014,8 +1063,10 @@ class JanelaPrincipal(QMainWindow):
     def definir_arquivo(self, arquivo):
         if self._ocupado:
             return
+        self._limpar_erro()
         self.arquivo = Path(arquivo)
         self.resultado = None
+        self.execucao_relatorio = None
         self.nome_arquivo.setText(self.arquivo.name)
         self.nome_arquivo.setToolTip(str(self.arquivo))
         self.turma.clear()
@@ -1048,16 +1099,17 @@ class JanelaPrincipal(QMainWindow):
         self.contagem.setText("Sem distribuição.")
         self._atualizar_botoes()
 
-    def _iniciar_tarefa(self, funcao, args, ao_concluir=None, *, distribuindo=False):
+    def _iniciar_tarefa(self, funcao, args, ao_concluir=None, *, distribuindo=False, ao_falhar=None):
         if self._ocupado:
             return
+        self._limpar_erro()
         self._ocupado = True
         self.carregamento.setVisible(distribuindo)
         self._atualizar_botoes()
         self._tarefa = Tarefa(funcao, *args, parent=self)
         if ao_concluir is not None:
             self._tarefa.concluida.connect(ao_concluir)
-        self._tarefa.falhou.connect(self._falhou)
+        self._tarefa.falhou.connect(ao_falhar or self._falhou)
         self._tarefa.finished.connect(self._finalizar_tarefa)
         self._tarefa.start()
 
@@ -1067,8 +1119,10 @@ class JanelaPrincipal(QMainWindow):
             self._iniciar_tarefa(self.processador, (self.arquivo,), self.mostrar_resultado, distribuindo=True)
 
     def mostrar_resultado(self, resultado: ResultadoInterface):
+        self._limpar_erro()
         self.carregamento.hide()
         self.resultado = resultado
+        self.execucao_relatorio = IdentificacaoExecucao()
         self._mostrar_dashboard(resultado.metricas)
         self.turma.blockSignals(True)
         self.turma.clear()
@@ -1180,9 +1234,42 @@ class JanelaPrincipal(QMainWindow):
         if self.resultado is not None:
             self._iniciar_tarefa(self.exportador, (self.resultado, Path(destino)))
 
+    def escolher_destino_pdf(self):
+        if self.resultado is None or self._ocupado:
+            return
+        sugerido = self.resultado.origem.with_name(f"{self.resultado.origem.stem}_relatorio.pdf")
+        nome, _ = QFileDialog.getSaveFileName(self, "Exportar relatório PDF", str(sugerido), "Relatório PDF (*.pdf)")
+        if nome:
+            destino = Path(nome)
+            if destino.suffix.lower() != ".pdf":
+                destino = Path(str(destino) + ".pdf")
+            self.exportar_para_pdf(destino)
+
+    def exportar_para_pdf(self, destino):
+        if self.resultado is not None and not self._ocupado:
+            self._iniciar_tarefa(
+                self.exportador_pdf, (self.resultado, Path(destino), self.execucao_relatorio),
+                ao_falhar=self._falhou_pdf,
+            )
+
+    def _falhou_pdf(self, mensagem):
+        self._falhou(mensagem)
+        self.titulo_erro.setText("Não foi possível exportar o relatório PDF.")
+        self.orientacao_erro.setText("Verifique se a pasta de destino está disponível para gravação.")
+
     def _falhou(self, mensagem):
         self.carregamento.hide()
-        QMessageBox.critical(self, "Operação não concluída", mensagem)
+        detalhe = mensagem or ""
+        self.detalhe_erro.setText(detalhe)
+        self.detalhe_erro.setVisible(bool(detalhe.strip()))
+        self.banner_erro.show()
+
+    def _limpar_erro(self):
+        self.banner_erro.hide()
+        self.titulo_erro.setText("Não foi possível processar a planilha.")
+        self.orientacao_erro.setText("Verifique se o arquivo está no formato esperado pelo sistema.")
+        self.detalhe_erro.clear()
+        self.detalhe_erro.hide()
 
     def _finalizar_tarefa(self):
         self._ocupado = False

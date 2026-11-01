@@ -17,6 +17,7 @@ FUNDO_VERDE = "#EDF7E5"
 FUNDO_TURQUESA = "#EAF8F3"
 ALERTA = "#B86B12"
 FUNDO_ALERTA = "#FFF1DC"
+BORDA_ALERTA = "#EBD6B4"
 RAIO = 12
 RAIO_INTERNO = 10
 PADDING_INTERNO = 12
@@ -57,6 +58,7 @@ ESTILO = Template("""
 QMainWindow, QWidget#central { background: $FUNDO; color: $TEXTO; }
 QWidget { font-family: $FAMILIAS_QSS; font-size: ${FONTE_BASE}px; font-weight: 400; color: $TEXTO; }
 QFrame#painel, QFrame#cardResumo { background: $BRANCO; border: 1px solid $BORDA; border-radius: ${RAIO}px; }
+QFrame#bannerErro { background: $FUNDO_ALERTA; border: 1px solid $BORDA_ALERTA; border-radius: ${RAIO}px; }
 QFrame#quadroQualidade { background: $FUNDO; border: 1px solid $BORDA; border-radius: ${RAIO_INTERNO}px; }
 QFrame#iconeCard { background: $FUNDO_AZUL; border: none; border-radius: 11px; }
 QFrame#iconeCard[tipo="positivo"] { background: $FUNDO_VERDE; }

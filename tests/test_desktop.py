@@ -598,7 +598,9 @@ class InterfaceTest(unittest.TestCase):
         self.assertEqual(w.findChildren(QProgressBar), [w.progresso])
         principal = w.centralWidget().widget().layout()
         self.assertEqual(principal.indexOf(w.carregamento), principal.indexOf(w.nome_arquivo.parentWidget()) + 1)
-        self.assertEqual(principal.indexOf(w.navegacao), principal.indexOf(w.carregamento) + 1)
+        self.assertEqual(principal.indexOf(w.banner_erro), principal.indexOf(w.carregamento) + 1)
+        self.assertEqual(principal.indexOf(w.navegacao), principal.indexOf(w.banner_erro) + 1)
+        self.assertTrue(w.banner_erro.isHidden())
         w.definir_arquivo(Path("amostra.xlsx"))
         QTest.qWait(30)
         posicao_abas = w.navegacao.y()
@@ -909,17 +911,83 @@ class InterfaceTest(unittest.TestCase):
             raise ValueError("Falha de teste")
         w.processador = processar
         w.definir_arquivo(Path("amostra.xlsx"))
-        with patch("interface_desktop.QMessageBox.critical") as alerta:
-            w.gerar_distribuicao()
-            limite = time.monotonic() + 3
-            while w._ocupado and time.monotonic() < limite:
-                QTest.qWait(10)
-            alerta.assert_called_once_with(w, "Operação não concluída", "Falha de teste")
+        w.gerar_distribuicao()
+        limite = time.monotonic() + 3
+        while w._ocupado and time.monotonic() < limite:
+            QTest.qWait(10)
         self.assertFalse(w._ocupado)
         self.assertTrue(w.carregamento.isHidden())
         self.assertFalse(w.progresso.isVisible())
         self.assertFalse(w.mensagem_carregamento.isVisible())
         self.assertTrue(w.gerar.isEnabled())
+        self.assertTrue(w.banner_erro.isVisible())
+        self.assertEqual(w.titulo_erro.text(), "Não foi possível processar a planilha.")
+        self.assertEqual(w.orientacao_erro.text(), "Verifique se o arquivo está no formato esperado pelo sistema.")
+        self.assertEqual(w.detalhe_erro.text(), "Falha de teste")
+        self.assertIsNone(self.app.activeModalWidget())
+        w.processador = lambda _: amostra()
+        w.gerar_distribuicao()
+        self.assertTrue(w.banner_erro.isHidden())
+        limite = time.monotonic() + 3
+        while w._ocupado and time.monotonic() < limite:
+            QTest.qWait(10)
+        self.assertFalse(w._ocupado)
+        self.assertTrue(w.banner_erro.isHidden())
+        self.assertEqual(w.detalhe_erro.text(), "")
+        self.assertEqual(w.modelo.rowCount(), 2)
+
+    def test_validacao_real_exibe_motivo_no_banner_e_preserva_arquivo(self):
+        w = self.janela
+        with tempfile.TemporaryDirectory() as pasta:
+            origem = Path(pasta) / "sem_turmas.xlsx"
+            livro = Workbook()
+            livro.active.title = "Alunos"
+            livro.active.append(["Nome", "Sexo", "Disponibilidade"])
+            livro.active.append(["Ana", "F", "Manhã"])
+            livro.save(origem)
+            livro.close()
+            original = origem.read_bytes()
+            w.definir_arquivo(origem)
+            with patch("ensalamento.resolver") as resolver:
+                w.gerar_distribuicao()
+                limite = time.monotonic() + 3
+                while w._ocupado and time.monotonic() < limite:
+                    QTest.qWait(10)
+                resolver.assert_not_called()
+            self.assertFalse(w._ocupado)
+            self.assertTrue(w.banner_erro.isVisible())
+            self.assertEqual(w.detalhe_erro.text(), "O arquivo precisa conter a aba 'Turmas'.")
+            self.assertEqual(w.detalhe_erro.textFormat(), Qt.TextFormat.PlainText)
+            self.assertEqual(origem.read_bytes(), original)
+            self.assertIsNone(self.app.activeModalWidget())
+            self.assertTrue(w.gerar.isEnabled())
+            self.assertFalse(w.exportar.isEnabled())
+            w.definir_arquivo(Path(pasta) / "outra.xlsx")
+            self.assertTrue(w.banner_erro.isHidden())
+            self.assertEqual(w.detalhe_erro.text(), "")
+
+    def test_banner_sem_detalhe_e_falha_de_exportacao_nao_abrem_modal(self):
+        w = self.janela
+        w._falhou("")
+        self.assertTrue(w.banner_erro.isVisible())
+        self.assertTrue(w.detalhe_erro.isHidden())
+        resultado = amostra()
+        w.definir_arquivo(Path("amostra.xlsx"))
+        w.mostrar_resultado(resultado)
+        self.assertTrue(w.banner_erro.isHidden())
+        def exportar(*_):
+            raise PermissionError("Feche a planilha no Excel e tente exportar novamente.")
+        w.exportador = exportar
+        w.exportar_para(Path("saida.xlsx"))
+        limite = time.monotonic() + 3
+        while w._ocupado and time.monotonic() < limite:
+            QTest.qWait(10)
+        self.assertFalse(w._ocupado)
+        self.assertTrue(w.banner_erro.isVisible())
+        self.assertEqual(w.detalhe_erro.text(), "Feche a planilha no Excel e tente exportar novamente.")
+        self.assertIsNone(self.app.activeModalWidget())
+        self.assertIs(w.resultado, resultado)
+        self.assertTrue(w.exportar.isEnabled())
 
     def test_exportacao_nao_exibe_carregamento_da_distribuicao(self):
         w = self.janela
