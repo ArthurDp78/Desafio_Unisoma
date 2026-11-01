@@ -28,6 +28,9 @@ ICONE_CARD = 24
 CONTADOR_MINIMO = 24
 PADDING_ABA_VERTICAL = 10
 PADDING_ABA_HORIZONTAL = 14
+ALFA_ABA_INATIVA = 24
+ALFA_ABA_HOVER = 36
+ALFA_ABA_ATIVA = 48
 FAMILIAS_FONTES = ("Inter", "Segoe UI", "Noto Sans", "Arial", "Liberation Sans", "DejaVu Sans")
 FAMILIAS_QSS = ", ".join(f"'{nome}'" for nome in FAMILIAS_FONTES) + ", sans-serif"
 FONTE_BASE = 14
@@ -61,6 +64,8 @@ QLabel#secao { font-size: ${FONTE_TITULO}px; font-weight: 600; color: $AZUL; }
 QLabel#subtitulo { font-size: 14px; font-weight: 500; color: $TEXTO; }
 QLabel#eixo { font-size: ${FONTE_EIXO}px; font-weight: 500; color: $TEXTO; }
 QLabel#discreto { color: $TEXTO_SECUNDARIO; font-size: 13px; }
+QLabel#avisoConclusao { color: $TEXTO; font-size: 13px; background: $FUNDO_TURQUESA;
+                      border: 1px solid $BORDA; border-radius: ${RAIO_INTERNO}px; padding: 8px 12px; }
 QLabel#legenda { color: $TEXTO; font-size: 14px; }
 QLabel#numeroCard { font-size: 24px; font-weight: 500; color: $AZUL; }
 QLabel#valorQualidade { font-size: 16px; font-weight: 500; color: $AZUL; }
@@ -86,8 +91,6 @@ QPushButton#navegacaoBotao { background: transparent; border: none; border-radiu
                           color: $TEXTO_SECUNDARIO; padding: 0; }
 QLabel#textoNavegacao { color: $TEXTO_SECUNDARIO; font-size: 14px; font-weight: 400; }
 QLabel#textoNavegacao[ativa="true"] { color: $AZUL; font-weight: 500; }
-QPushButton#navegacaoBotao:hover { background: #F3F6FC; color: $AZUL; }
-QPushButton#navegacaoBotao:checked { background: $FUNDO_AZUL; color: $AZUL; }
 QPushButton:focus, QLineEdit:focus, QComboBox:focus { border-color: $AZUL; }
 QLineEdit, QComboBox { background: white; border: 1px solid $BORDA; border-radius: 8px;
                      padding: 7px 10px; min-height: 20px; }
@@ -108,3 +111,17 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
 QProgressBar { background: $FUNDO_TURQUESA; border: none; height: 4px; }
 QProgressBar::chunk { background: $TURQUESA_ESCURO; }
 """).substitute({k: str(v) for k, v in globals().copy().items() if k.isupper()})
+
+
+def _estilo_abas():
+    regras = []
+    for secao, cor in (("dashboard", AZUL), ("alunos", TURQUESA), ("ocorrencias", VERDE)):
+        rgb = ", ".join(str(int(cor[i:i + 2], 16)) for i in (1, 3, 5))
+        for estado, alfa in (("", ALFA_ABA_INATIVA), (":hover", ALFA_ABA_HOVER), (":checked", ALFA_ABA_ATIVA)):
+            regras.append(
+                f'QPushButton#navegacaoBotao[secao="{secao}"]{estado} {{ background: rgba({rgb}, {alfa}); }}')
+        regras.append(f'QFrame#marcador[secao="{secao}"] {{ background: {cor}; }}')
+    return "\n".join(regras)
+
+
+ESTILO += "\n" + _estilo_abas()

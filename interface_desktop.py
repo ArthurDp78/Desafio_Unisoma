@@ -99,13 +99,15 @@ class NavegacaoSecoes(QFrame):
         layout.setContentsMargins(6, 6, 6, 10)
         layout.setSpacing(5)
         self.rotulos = []
-        for indice, (titulo, icone) in enumerate((
-            ("Dashboard", "tab_dashboard"), ("Alunos por turma", "tab_alunos"),
-            ("Inconsistências e avisos", "tab_inconsistencias"),
+        for indice, (titulo, icone, secao) in enumerate((
+            ("Dashboard", "tab_dashboard", "dashboard"),
+            ("Alunos por turma", "tab_alunos", "alunos"),
+            ("Inconsistências e avisos", "tab_inconsistencias", "ocorrencias"),
         )):
             botao = BotaoNavegacao()
             botao.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             botao.setObjectName("navegacaoBotao")
+            botao.setProperty("secao", secao)
             botao.setMinimumHeight(max(ICONE, CONTADOR_MINIMO) + 2 * PADDING_ABA_VERTICAL)
             conteudo = QHBoxLayout(botao)
             conteudo.setContentsMargins(PADDING_ABA_HORIZONTAL, PADDING_ABA_VERTICAL,
@@ -140,7 +142,6 @@ class NavegacaoSecoes(QFrame):
             self.botoes.append(botao)
             layout.addWidget(botao, 1)
         self.botoes[0].setChecked(True)
-        self._atualizar_estilo()
         self.grupo.idClicked.connect(self.selecionar)
         self.marcador = QFrame(self)
         self.marcador.setObjectName("marcador")
@@ -148,6 +149,7 @@ class NavegacaoSecoes(QFrame):
         self.animacao = QPropertyAnimation(self.marcador, b"geometry", self)
         self.animacao.setDuration(120)
         self.animacao.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._atualizar_estilo()
 
     def selecionar(self, indice):
         if not 0 <= indice < len(self.botoes) or indice == self.indice:
@@ -163,6 +165,10 @@ class NavegacaoSecoes(QFrame):
             rotulo.setProperty("ativa", indice == self.indice)
             rotulo.style().unpolish(rotulo)
             rotulo.style().polish(rotulo)
+        self.marcador.setProperty("secao", self.botoes[self.indice].property("secao"))
+        self.marcador.style().unpolish(self.marcador)
+        self.marcador.style().polish(self.marcador)
+        self.marcador.update()
 
     def atualizar_ocorrencias(self, inconsistencias=0, avisos=0):
         total = inconsistencias + avisos
