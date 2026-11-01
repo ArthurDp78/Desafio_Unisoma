@@ -60,12 +60,12 @@ Os parâmetros são lidos do Excel em cada execução; não ficam fixos no códi
 
 Na interface, o cálculo usa uma cópia temporária e mantém a planilha original intacta. **Exportar XLSX** grava a cópia completa no destino escolhido, com `Ensalamento` e `Inconsistências` atualizadas após o status `Optimal`. As abas `Alunos`, `Turmas` e eventuais abas adicionais são preservadas, assim como a formatação suportada pela rotina original do projeto. A exportação não executa o solver novamente.
 
-A execução pelo terminal com caminho explícito mantém o comportamento original: atualiza o próprio arquivo informado. Em ambos os casos, a gravação é feita primeiro em um temporário e substituída ao terminar. Feche a planilha no Excel antes de sobrescrever um arquivo existente.
+A execução pelo terminal com caminho explícito preserva a planilha de entrada e grava uma cópia em `outputs/xlsx/<nome>_ensalamento.xlsx`. A interface continua abrindo o seletor de destino para exportar XLSX. Em ambos os casos, a gravação do resultado é feita primeiro em um temporário e substituída ao terminar.
 
 ## Interface desktop
 
 - Importar XLSX, gerar a distribuição e exportar o workbook completo.
-- **Exportar relatório PDF** fica disponível ao lado de **Exportar XLSX** após gerar uma distribuição. O relatório A4 inclui arquivo e identificação/data da execução, resumo geral, resumo por turno, indicadores de qualidade, gráficos completos e inconsistências/avisos separados. A seção final contém a lista completa de alunos por turma, com turno, alunos/capacidade, nome, sexo e disponibilidade, além dos alunos sem turma quando houver. Cabeçalhos de tabelas se repetem nas continuações e todas as páginas têm cabeçalho institucional e numeração. Os filtros da tela não restringem o PDF.
+- **Exportar relatório PDF** fica disponível ao lado de **Exportar XLSX** após gerar uma distribuição. O seletor sugere `outputs/pdf/<nome>_relatorio.pdf` e continua permitindo escolher outro destino. O relatório A4 inclui arquivo e identificação/data da execução, resumo geral, resumo por turno, indicadores de qualidade, gráficos completos e inconsistências/avisos separados. A seção final contém a lista completa de alunos por turma, com turno, alunos/capacidade, nome, sexo e disponibilidade, além dos alunos sem turma quando houver. Cabeçalhos de tabelas se repetem nas continuações e todas as páginas têm cabeçalho institucional e numeração. Os filtros da tela não restringem o PDF.
 - Falhas são exibidas dentro da aplicação, sem modal, em um banner de atenção abaixo do card superior. A mensagem principal orienta a verificar o formato da planilha e o detalhe preserva o motivo retornado pelo processamento. O banner é limpo ao carregar outro arquivo, iniciar uma nova tentativa ou receber um resultado válido; a validação original permanece inalterada.
 - Dashboard com quatro cards brancos: alunos alocados/total, alunos sem turma, ocupação e ociosidade. Os gráficos de alunos/capacidade e homens/mulheres têm maior altura, textos de alto contraste e eixos explícitos. A partir de 1200 px de largura, os gráficos e os painéis inferiores ficam lado a lado e os cards em uma linha. Abaixo disso, preserva-se o carrossel dos gráficos, os painéis inferiores ficam empilhados e os cards usam duas colunas. Clicar numa linha do gráfico seleciona a turma correspondente.
 - O resumo por turno apresenta Manhã e Tarde nas linhas e as colunas Turno, Alocados, Sem turma, Capacidade, Ocupação e Vagas livres. Linhas finas separam cabeçalho e registros. O card de qualidade organiza a maior diferença de tamanho por turno e a maior variação H/M em dois quadros internos leves. A lista de turmas empatadas mostra até quatro nomes separados por vírgulas, com `...` quando há mais; a tooltip e a descrição acessível preservam a lista completa. Os quadros se empilham quando o card fica estreito; os dados e cálculos das métricas são preservados.
@@ -76,11 +76,11 @@ A execução pelo terminal com caminho explícito mantém o comportamento origin
 
 A interface usa Qt/PySide6 Essentials, sem navegador ou servidor. Os gráficos são widgets desenhados com `QPainter`; não há biblioteca gráfica adicional. Cada gráfico tem rolagem própria para as barras, com ticks, linha e título do eixo horizontal em um widget irmão fixo, fora do `QScrollArea` das barras. O dashboard tem sua própria rolagem para acessar os painéis inferiores. A tabela de alunos usa model/view, sem criar um widget por aluno. Botões exclusivos e `QStackedWidget` implementam a navegação; os mesmos widgets, dados, seleção e conexões são preservados ao redimensionar. A altura dos gráficos acompanha a altura da janela, com limites legíveis; no modo desktop, eles cedem até 32 px quando isso basta para eliminar uma pequena rolagem externa, preservando a altura mínima. Trocar de seção ou redimensionar não recalcula dados nem reinicia a tabela. A única animação decorativa move o marcador da navegação por 120 ms.
 
-`tema.py` centraliza cores da identidade ABC Aprendiz, fontes, dimensões e QSS. A tipografia usa a sequência anterior de fallback: Inter, Segoe UI, Noto Sans, Arial e alternativas locais, sem baixar fontes. Textos e ticks usam peso regular, valores e navegação ativa usam medium e títulos de painéis usam semibold. Durante o cálculo, a mensagem “Aguarde. A distribuição está sendo gerada.” e a linha verde indeterminada aparecem imediatamente abaixo do card de importação. Ambas desaparecem ao concluir ou falhar, sem reservar espaço; não há faixa de status persistente nem carregamento no rodapé. O botão de gerar permanece bloqueado enquanto a operação está em andamento. As abas têm altura comum, padding uniforme e larguras equivalentes quando há espaço; o badge tem uma reserva discreta para não deslocar o título ao aparecer. Cards são `QFrame`s com layouts nativos. Os dez SVGs fornecidos ficam em `assets/icons/`, usados diretamente por `QSvgWidget`, incluindo o `card_qualidade.svg` atualizado. `recursos.caminho_recurso` resolve os caminhos no código e no pacote PyInstaller; `ABC_Aprendiz.spec` já inclui toda a pasta `assets` e os módulos SVG do Qt.
+`ui/tema.py` centraliza cores da identidade ABC Aprendiz, fontes, dimensões e QSS. A tipografia usa a sequência anterior de fallback: Inter, Segoe UI, Noto Sans, Arial e alternativas locais, sem baixar fontes. Textos e ticks usam peso regular, valores e navegação ativa usam medium e títulos de painéis usam semibold. Durante o cálculo, a mensagem “Aguarde. A distribuição está sendo gerada.” e a linha verde indeterminada aparecem imediatamente abaixo do card de importação. Ambas desaparecem ao concluir ou falhar, sem reservar espaço; não há faixa de status persistente nem carregamento no rodapé. O botão de gerar permanece bloqueado enquanto a operação está em andamento. As abas têm altura comum, padding uniforme e larguras equivalentes quando há espaço; o badge tem uma reserva discreta para não deslocar o título ao aparecer. Cards são `QFrame`s com layouts nativos. Os SVGs ficam em `assets/icons/` e o logo em `assets/images/`; `ui/recursos.py` resolve caminhos no código e no pacote PyInstaller. `ABC_Aprendiz.spec` inclui toda a pasta `assets` e os módulos SVG do Qt.
 
 Leitura, resolução e exportação rodam fora da thread da interface. Durante uma operação, importar, calcular e exportar ficam bloqueados para impedir resultados de instâncias diferentes na mesma tela; navegar pelas seções continua disponível. O fechamento aguarda a operação em andamento.
 
-`ensalamento.py` mantém as funções de leitura, validação, modelo e gravação; apenas o ponto de entrada gráfico foi substituído. `apresentacao.py` adapta os resultados da rotina original para a tela e mantém o workbook processado para exportação. `interface_desktop.py` contém a interface Qt. `relatorio_pdf.py` gera o relatório usando `QPdfWriter`, texto/tabelas nativos de `QTextDocument` e gráficos renderizados com `QPainter`, sem navegador ou dependências adicionais. A exportação roda em background sobre o resultado em memória, sem chamar o solver, recalcular métricas ou ler/gravar XLSX. O PDF é gravado em um temporário e substitui o destino apenas ao finalizar; falhas aparecem no banner da aplicação. O botão fica desabilitado sem resultado ou durante uma operação.
+`ensalamento.py` mantém as funções de leitura, validação, modelo e gravação; apenas o ponto de entrada gráfico foi substituído. `apresentacao.py` adapta os resultados da rotina original para a tela e mantém o workbook processado para exportação. `ui/interface_desktop.py` contém a interface Qt. `relatorio_pdf.py` gera o relatório usando `QPdfWriter`, texto/tabelas nativos de `QTextDocument` e gráficos renderizados com `QPainter`, sem navegador ou dependências adicionais. A exportação roda em background sobre o resultado em memória, sem chamar o solver, recalcular métricas ou ler/gravar XLSX. O PDF é gravado em um temporário e substitui o destino apenas ao finalizar; falhas aparecem no banner da aplicação. O botão fica desabilitado sem resultado ou durante uma operação.
 
 ### Métricas do painel
 
@@ -155,6 +155,9 @@ Os testes verificam métricas, modos desktop e compacto, tabela transposta por t
 ## Conteúdo desta pasta
 
 ```text
+assets/
+  icons/
+  images/
 Contexto/
   Desafio_UniSoma.pdf
   Modelo Conceitual Desafio 2026.pdf
@@ -165,9 +168,16 @@ Dados/
   instancia_4.xlsx
 ensalamento.py
 apresentacao.py
-interface_desktop.py
 metricas.py
 dados.py
+relatorio_pdf.py
+ui/
+  interface_desktop.py
+  tema.py
+  recursos.py
+outputs/
+  xlsx/
+  pdf/
 ABC_Aprendiz.spec
 executar.bat
 gerar_executavel.bat

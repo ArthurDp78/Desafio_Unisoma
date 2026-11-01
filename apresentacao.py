@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unicodedata
+from zipfile import BadZipFile
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -99,14 +100,17 @@ def inconsistencias_editaveis(origem: Path, registros: list[dict]) -> list[dict]
             return saida
         finally:
             livro.close()
-    except (OSError, KeyError, ValueError):
+    except (OSError, KeyError, ValueError, BadZipFile):
         # Problemas estruturais continuam sob a validação atual da planilha.
         return []
 
 
 def detalhes_registros_por_linha(planilha_bytes: bytes, linhas: list[int]) -> dict[int, dict]:
     """Devolve os valores atuais da aba Alunos para as linhas pedidas."""
-    livro = load_workbook(BytesIO(planilha_bytes), read_only=True, data_only=True)
+    try:
+        livro = load_workbook(BytesIO(planilha_bytes), read_only=True, data_only=True)
+    except BadZipFile:
+        return {}
     try:
         if "Alunos" not in livro.sheetnames:
             raise ValueError("A aba 'Alunos' não foi encontrada.")

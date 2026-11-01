@@ -14,8 +14,8 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from apresentacao import processar_planilha
-from interface_desktop import JanelaPrincipal, LARGURA_DASHBOARD_DESKTOP
-from tema import fonte_interface
+from ui.interface_desktop import JanelaPrincipal, LARGURA_DASHBOARD_DESKTOP
+from ui.tema import fonte_interface
 
 
 def main():

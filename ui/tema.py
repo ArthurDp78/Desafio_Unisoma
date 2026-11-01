@@ -1,7 +1,7 @@
 """Identidade visual ABC Aprendiz: cores, dimensões e QSS compartilhados."""
 from string import Template
 from PySide6.QtGui import QFont
-from recursos import caminho_recurso
+from .recursos import caminho_recurso
 
 AZUL = "#2A469A"
 TURQUESA = "#3DBD9D"

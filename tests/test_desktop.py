@@ -24,15 +24,15 @@ from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QFrame, QProgressBar, QStackedWidget, QWidget
 
 from apresentacao import ResultadoInterface, exportar_planilha, processar_planilha, relatorios_interface
-from recursos import caminho_recurso
+from ui.recursos import caminho_recurso
 import ensalamento
 from dados import Aluno
-from interface_desktop import (
+from ui.interface_desktop import (
     Grafico, JanelaPrincipal,
     LARGURA_DASHBOARD_DESKTOP,
 )
 from metricas import calcular_metricas
-from tema import ESPACO_SECOES
+from ui.tema import ESPACO_SECOES
 
 
 def criar_entrada(caminho):
@@ -773,8 +773,11 @@ class InterfaceTest(unittest.TestCase):
         self.assertGreater(w.tabela.viewport().height(), 300)
         w.mudar_secao(2)
         QTest.qWait(40)
-        self.assertLess(w.relatorio.viewport().height(), 60)
-        self.assertGreater(w.avisos.viewport().height(), w.relatorio.viewport().height())
+        self.assertIs(w.secoes.widget(2), w.pagina_ocorrencias)
+        self.assertFalse(w.ocorrencias.isAncestorOf(w.botao_salvar_correcoes))
+        self.assertFalse(w.ocorrencias.isAncestorOf(w.gerar_validos))
+        self.assertTrue(w.botao_salvar_correcoes.isVisible())
+        self.assertTrue(w.gerar_validos.isVisible())
 
     def test_ocorrencias_vazias_sao_compactas_e_preservam_espacamento(self):
         w = self.janela
@@ -803,15 +806,14 @@ class InterfaceTest(unittest.TestCase):
         for largura, altura in ((1366, 768), (680, 600), (1920, 1080)):
             w.resize(largura, altura)
             QTest.qWait(60)
-            alturas.append(w.avisos.height())
+            alturas.append(w.formulario_avisos.height())
             self.assertGreater(w.ocorrencias.verticalScrollBar().maximum(), 0)
             self.assertEqual(w.ocorrencias.horizontalScrollBar().maximum(), 0)
-            self.assertEqual(w.avisos.verticalScrollBar().maximum(), 0)
-            self.assertEqual(w.avisos.horizontalScrollBar().maximum(), 0)
-            cursor = w.avisos.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
-            self.assertLessEqual(w.avisos.cursorRect(cursor).bottom(), w.avisos.viewport().height())
+            self.assertTrue(w.avisos.isHidden())
+            self.assertEqual(w.formulario_avisos_layout.count(), len(registros))
             self.assertEqual(w.avisos.toPlainText(), relatorios_interface(resultado)[1])
+            self.assertFalse(w.ocorrencias.isAncestorOf(w.botao_salvar_correcoes))
+            self.assertFalse(w.ocorrencias.isAncestorOf(w.gerar_validos))
             w.ocorrencias.verticalScrollBar().setValue(w.ocorrencias.verticalScrollBar().maximum())
             self.app.processEvents()
             painel = w.paineis_ocorrencias[1]

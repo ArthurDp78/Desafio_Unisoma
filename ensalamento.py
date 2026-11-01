@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import unicodedata
 import os
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -313,7 +314,7 @@ def executar(arquivo: Path) -> str:
 
 
 def interface() -> None:
-    from interface_desktop import iniciar
+    from ui.interface_desktop import iniciar
 
     iniciar()
 
@@ -321,7 +322,15 @@ def interface() -> None:
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         try:
-            print(executar(Path(sys.argv[1])))
+            from ui.recursos import diretorio_aplicacao
+
+            entrada = Path(sys.argv[1]).expanduser().resolve()
+            pasta_saida = diretorio_aplicacao() / "outputs" / "xlsx"
+            pasta_saida.mkdir(parents=True, exist_ok=True)
+            destino = pasta_saida / f"{entrada.stem}_ensalamento.xlsx"
+            shutil.copy2(entrada, destino)
+            print(executar(destino))
+            print(f"Arquivo gerado: {destino}")
         except Exception as exc:
             print(f"Erro: {exc}", file=sys.stderr)
             raise SystemExit(1)

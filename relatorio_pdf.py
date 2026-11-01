@@ -20,8 +20,8 @@ from apresentacao import (
     ResultadoInterface, formatar_percentual, nome_turma_visual, separar_ocorrencias,
     texto_diferenca_turmas, texto_variacao_genero,
 )
-from recursos import caminho_recurso
-from tema import (
+from ui.recursos import caminho_recurso
+from ui.tema import (
     ALERTA, AZUL, BORDA, BRANCO, FUNDO, FUNDO_ALERTA, FUNDO_AZUL,
     TEXTO, TEXTO_SECUNDARIO, TURQUESA, TURQUESA_ESCURO, VERDE, fonte_interface,
 )
@@ -303,7 +303,7 @@ def _escrever_pdf(resultado, destino, execucao):
         conteudo = _Conteudo(corpo_largura, corpo_altura, writer)
         _montar_conteudo(conteudo, resultado, execucao, datetime.now().astimezone())
         paginas = conteudo.doc.pageCount()
-        logo = QImage(str(caminho_recurso("assets", "logo_abc_aprendiz.png")))
+        logo = QImage(str(caminho_recurso("assets", "images", "logo_abc_aprendiz.png")))
         if not pintor.begin(writer):
             raise OSError("Não foi possível iniciar a gravação do PDF.")
         for pagina in range(paginas):

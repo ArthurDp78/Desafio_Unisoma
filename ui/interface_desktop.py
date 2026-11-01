@@ -22,9 +22,9 @@ from apresentacao import (
     texto_busca, texto_diferenca_turmas, texto_variacao_genero,
 )
 
-from recursos import caminho_recurso
+from .recursos import caminho_recurso, diretorio_aplicacao
 from relatorio_pdf import IdentificacaoExecucao, exportar_relatorio_pdf
-from tema import (
+from .tema import (
     AZUL, TURQUESA, TURQUESA_ESCURO, TEXTO, TEXTO_SECUNDARIO,
     FUNDO, BRANCO, BORDA, FUNDO_AZUL, ESTILO, ESPACO, MARGEM_PAINEL,
     ICONE, ICONE_CARD, FONTE_GRAFICO, FONTE_EIXO, ALTURA_EIXO,
@@ -547,7 +547,7 @@ class JanelaPrincipal(QMainWindow):
         self._ajuste_dashboard.setSingleShot(True)
         self._ajuste_dashboard.timeout.connect(self._ajustar_excesso_dashboard)
         self.setWindowTitle("ABC Aprendiz - Ensalamento")
-        self.setWindowIcon(QIcon(str(caminho_recurso("assets", "logo_abc_aprendiz.png"))))
+        self.setWindowIcon(QIcon(str(caminho_recurso("assets", "images", "logo_abc_aprendiz.png"))))
         self.resize(LARGURA_DASHBOARD_DESKTOP + 80, 880)
         self.setMinimumSize(680, 600)
         self.setStyleSheet(ESTILO)
@@ -674,7 +674,7 @@ class JanelaPrincipal(QMainWindow):
         principal.setSpacing(13)
         cabecalho = QHBoxLayout()
         logo = QLabel()
-        logo.setPixmap(QPixmap(str(caminho_recurso("assets", "logo_abc_aprendiz.png"))).scaledToHeight(
+        logo.setPixmap(QPixmap(str(caminho_recurso("assets", "images", "logo_abc_aprendiz.png"))).scaledToHeight(
             42, Qt.TransformationMode.SmoothTransformation))
         logo.setAccessibleName("ABC Aprendiz")
         cabecalho.addWidget(logo)
@@ -1561,7 +1561,9 @@ class JanelaPrincipal(QMainWindow):
     def escolher_destino_pdf(self):
         if self.resultado is None or self._ocupado:
             return
-        sugerido = self.resultado.origem.with_name(f"{self.resultado.origem.stem}_relatorio.pdf")
+        pasta_pdf = diretorio_aplicacao() / "outputs" / "pdf"
+        pasta_pdf.mkdir(parents=True, exist_ok=True)
+        sugerido = pasta_pdf / f"{self.resultado.origem.stem}_relatorio.pdf"
         nome, _ = QFileDialog.getSaveFileName(self, "Exportar relatório PDF", str(sugerido), "Relatório PDF (*.pdf)")
         if nome:
             destino = Path(nome)
