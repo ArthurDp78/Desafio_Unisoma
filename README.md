@@ -6,7 +6,7 @@ Aplicativo desktop que distribui alunos em turmas de manhã e à tarde, respeita
 
 ## ⬇️ Baixar o executável para Windows
 
-### [Baixar `ABC_Aprendiz.exe` diretamente →](https://github.com/ArthurDp78/Desafio_Unisoma/raw/refs/heads/main/ABC_Aprendiz.exe)
+### [Baixar `ABC_Aprendiz.exe` diretamente →](https://media.githubusercontent.com/media/ArthurDp78/Desafio_Unisoma/main/ABC_Aprendiz.exe)
 
 É um arquivo único e não exige a instalação do Python. O GitHub Actions compila o `.exe` em um runner Windows e o adiciona ao repositório; o README aponta diretamente para o arquivo. Se o download ainda não estiver disponível logo após uma atualização, aguarde o workflow **Build Windows executable** terminar.
 
@@ -22,7 +22,7 @@ Se não houver vagas suficientes, o programa identifica os alunos que ficaram se
 
 ## Usar o programa
 
-1. Clique em [Baixar `ABC_Aprendiz.exe`](https://github.com/ArthurDp78/Desafio_Unisoma/raw/refs/heads/main/ABC_Aprendiz.exe).
+1. Clique em [Baixar `ABC_Aprendiz.exe`](https://media.githubusercontent.com/media/ArthurDp78/Desafio_Unisoma/main/ABC_Aprendiz.exe).
 2. Abra o arquivo. Não é necessário instalar Python.
 3. Clique em **Importar XLSX** e selecione a planilha.
 4. Clique em **Gerar distribuição**.

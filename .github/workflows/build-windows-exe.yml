@@ -3,6 +3,15 @@ name: Build Windows executable
 on:
   push:
     branches: [main]
+    paths:
+      - "*.py"
+      - "*.spec"
+      - "*.txt"
+      - "*.html"
+      - "ui/**"
+      - "assets/**"
+      - ".gitattributes"
+      - ".github/workflows/build-windows-exe.yml"
   workflow_dispatch:
 
 permissions:
