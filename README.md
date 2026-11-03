@@ -6,9 +6,9 @@ Aplicativo desktop que distribui alunos em turmas de manhã e à tarde, respeita
 
 ## ⬇️ Baixar o executável para Windows
 
-### [Acesse as Releases e baixe `ABC_Aprendiz.exe` →](https://github.com/ArthurDp78/Desafio_Unisoma/releases)
+### [Baixar `ABC_Aprendiz.exe` diretamente →](https://github.com/ArthurDp78/Desafio_Unisoma/raw/refs/heads/main/ABC_Aprendiz.exe)
 
-O executável é um arquivo único: não é necessário instalar Python para usar uma versão publicada. O arquivo não fica no código-fonte do repositório, pois a pasta `dist/` é criada durante a compilação e ignorada pelo Git. Se ainda não houver um executável na página de Releases, siga [as instruções para gerá-lo](#criar-executavel-do-windows).
+É um arquivo único e não exige a instalação do Python. O GitHub Actions compila o `.exe` em um runner Windows e o adiciona ao repositório; o README aponta diretamente para o arquivo. Se o download ainda não estiver disponível logo após uma atualização, aguarde o workflow **Build Windows executable** terminar.
 
 ## O que o programa faz
 
@@ -22,7 +22,7 @@ Se não houver vagas suficientes, o programa identifica os alunos que ficaram se
 
 ## Usar o programa
 
-1. Baixe `ABC_Aprendiz.exe` na página de [Releases](https://github.com/ArthurDp78/Desafio_Unisoma/releases).
+1. Clique em [Baixar `ABC_Aprendiz.exe`](https://github.com/ArthurDp78/Desafio_Unisoma/raw/refs/heads/main/ABC_Aprendiz.exe).
 2. Abra o arquivo. Não é necessário instalar Python.
 3. Clique em **Importar XLSX** e selecione a planilha.
 4. Clique em **Gerar distribuição**.
@@ -99,7 +99,7 @@ Ou, depois de instalar `requirements-dev.txt`, abra `gerar_executavel.bat`. O ar
 dist/ABC_Aprendiz.exe
 ```
 
-O executável deve ser compilado no Windows. Para oferecê-lo a todos que visitam o repositório, publique `ABC_Aprendiz.exe` como arquivo da seção **Releases**; o link de download está no início desta página. O build atual não tem assinatura digital, então o Windows pode mostrar um aviso de editor desconhecido.
+O executável deve ser compilado no Windows. O workflow do GitHub Actions faz isso após alterações na branch `main` e grava o resultado como `ABC_Aprendiz.exe` na raiz do repositório. Esse arquivo usa Git LFS para permitir o armazenamento de binários grandes. O build atual não tem assinatura digital, então o Windows pode mostrar um aviso de editor desconhecido.
 
 ## Tecnologias
 
